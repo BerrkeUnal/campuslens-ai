@@ -8,6 +8,8 @@ from backend.app.api.routes import (
     questions,
 )
 from backend.app.core.config import get_settings
+from backend.app.core.error_handlers import register_error_handlers
+from backend.app.core.middleware import RequestIDMiddleware
 
 
 def create_app() -> FastAPI:
@@ -27,6 +29,9 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    app.add_middleware(RequestIDMiddleware)
+    register_error_handlers(app)
 
     app.include_router(health.router, prefix="/api")
     app.include_router(documents.router, prefix="/api")
