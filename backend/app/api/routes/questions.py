@@ -2,9 +2,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from backend.app.ports.question_pipeline import QuestionPipeline
 from backend.app.schemas.questions import AskRequest, AskResponse
 from backend.app.services.question_service import (
-    QuestionPipeline,
     ask_question,
     get_question_pipeline,
 )

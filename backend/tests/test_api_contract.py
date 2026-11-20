@@ -2,7 +2,8 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.exceptions import ServiceUnavailableError
 from backend.app.main import app
-from backend.app.schemas.questions import AskRequest, AskResponse
+from backend.app.schemas.questions import PipelineResult
+from backend.app.schemas.retrieval import RetrievalMethod
 from backend.app.services.question_service import (
     get_question_pipeline,
 )
@@ -24,8 +25,9 @@ EXPECTED_PATHS = {
 class FailingQuestionPipeline:
     async def answer_question(
         self,
-        request: AskRequest,
-    ) -> AskResponse:
+        question: str,
+        method: RetrievalMethod,
+    ) -> PipelineResult:
         raise ServiceUnavailableError("LLM")
 
 

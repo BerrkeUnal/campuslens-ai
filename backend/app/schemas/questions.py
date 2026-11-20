@@ -27,6 +27,13 @@ class MetricsResponse(BaseModel):
     estimated_cost_usd: float | None = None
 
 
+class PipelineResult(BaseModel):
+    answer: str
+    insufficient_context: bool
+    sources: list[SourceResponse]
+    metrics: MetricsResponse
+
+
 class AskResponse(BaseModel):
     request_id: UUID
     answer: str
