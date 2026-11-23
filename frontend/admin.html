@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin · CampusLens AI</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="module" src="js/admin.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">İçeriğe geç</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="admin.html">CampusLens <span>AI · Admin</span></a>
+        <nav class="nav" aria-label="Admin menüsü">
+          <a href="admin.html" aria-current="page">Admin Ana Sayfa</a>
+          <a href="documents.html">Belgeler</a>
+          <a href="evaluation.html">Değerlendirme</a>
+          <a href="index.html">Öğrenci Ekranı</a>
+        </nav>
+        <div class="header-tools">
+          <span class="health" data-health data-status="unknown" role="status">
+            <span class="health__dot" aria-hidden="true"></span>
+            <span data-health-text>Sunucu kontrol ediliyor…</span>
+          </span>
+          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page" tabindex="-1">
+      <div class="page-intro">
+        <h1>Admin paneli</h1>
+        <p>Belgeleri yönetin, arama yöntemlerini değerlendirin ve öğrenci ekranını kontrol edin.</p>
+      </div>
+
+      <ul class="admin-grid" aria-label="Admin bölümleri">
+        <li class="card link-card">
+          <h2><a class="link-card__link" href="documents.html">Belge yönetimi</a></h2>
+          <p>PDF yükleme, belge listesi, indeksleme durumu ve silme.</p>
+          <p class="link-card__summary muted" id="documents-summary" aria-live="polite">Özet yükleniyor…</p>
+        </li>
+        <li class="card link-card">
+          <h2><a class="link-card__link" href="evaluation.html">Değerlendirme sonuçları</a></h2>
+          <p>BM25, dense, hybrid ve hybrid + rerank yöntemlerini test seti üzerinde karşılaştırma.</p>
+          <p class="link-card__summary muted" id="evaluation-summary" aria-live="polite">Özet yükleniyor…</p>
+        </li>
+        <li class="card link-card">
+          <h2><a class="link-card__link" href="index.html">Öğrenci ekranına dön</a></h2>
+          <p>Öğrencilerin gördüğü soru-cevap ekranı. Sorular hybrid + rerank yöntemiyle yanıtlanır.</p>
+        </li>
+      </ul>
+    </main>
+
+    <footer class="site-footer">CampusLens AI · Admin paneli</footer>
+  </body>
+</html>

@@ -6,7 +6,7 @@
 import { mockApi } from "./mock-data.js";
 
 /** API tabanı: tek sabit. Gerekirse yalnızca burayı değiştirin. */
-export const API_BASE_URL = "http://localhost:8000/api";
+export const API_BASE_URL = "http://127.0.0.1:8000/api";
 
 export const REQUEST_TIMEOUT_MS = 60_000;
 export const MAX_UPLOAD_MB = 20; // backend .env MAX_UPLOAD_MB ile aynı tutulmalı
@@ -154,7 +154,7 @@ export async function apiRequest(path, { method = "GET", json, formData, timeout
       throw new ApiError("Sunucu zamanında yanıt vermedi. Lütfen tekrar deneyin.", { code: "timeout" });
     }
     throw new ApiError(
-      "Sunucuya bağlanılamadı. Backend'in çalıştığından emin olun (uvicorn, port 8000).",
+      "Sunucuya bağlanılamadı. Lütfen daha sonra tekrar deneyin.",
       { code: "network_error" },
     );
   } finally {

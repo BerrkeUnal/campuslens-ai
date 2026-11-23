@@ -1,18 +1,11 @@
-// Soru-cevap ekranı (index.html)
+// Öğrenci soru-cevap ekranı (index.html)
 // Sözleşme: submitQuestion, renderAnswer, renderSources, setChatState
+// Öğrenci yöntem seçmez; tüm sorular hybrid_rerank ile gönderilir.
 
-import { METHOD_LABELS, RETRIEVAL_METHODS, askQuestion } from "./api.js";
-import {
-  el,
-  externalLink,
-  formatCost,
-  formatMs,
-  formatScore,
-  initPage,
-  renderError,
-  setButtonBusy,
-} from "./ui.js";
+import { askQuestion } from "./api.js";
+import { el, externalLink, formatMs, formatScore, initPage, renderError, setButtonBusy } from "./ui.js";
 
+const STUDENT_METHOD = "hybrid_rerank";
 const QUESTION_MIN = 3;
 const QUESTION_MAX = 1000;
 const CITATION_PATTERN = /\[(S\d+)\]/g;
@@ -52,12 +45,12 @@ export function setChatState(state, { error } = {}) {
 // Yanıt ve kaynak gösterimi
 // ---------------------------------------------------------------------------
 
-function sourceElementId(scope, sourceId) {
-  return `source-${scope}-${sourceId}`;
+function sourceElementId(sourceId) {
+  return `source-${sourceId}`;
 }
 
-function focusSource(scope, sourceId) {
-  const card = document.getElementById(sourceElementId(scope, sourceId));
+function focusSource(sourceId) {
+  const card = document.getElementById(sourceElementId(sourceId));
   if (!card) return;
   document.querySelectorAll(".source-card.is-highlighted").forEach((node) => node.classList.remove("is-highlighted"));
   card.classList.add("is-highlighted");
@@ -66,7 +59,7 @@ function focusSource(scope, sourceId) {
 }
 
 /** Yanıt metnini [S1] işaretlerini tıklanabilir yaparak güvenli biçimde üretir. */
-function buildAnswerNodes(answer, sources, scope) {
+function buildAnswerNodes(answer, sources) {
   const knownIds = new Set(sources.map((source) => source.source_id));
   const nodes = [];
   let lastIndex = 0;
@@ -82,10 +75,10 @@ function buildAnswerNodes(answer, sources, scope) {
         attrs: {
           type: "button",
           "aria-label": `${sourceId} kaynağına git`,
-          "aria-controls": sourceElementId(scope, sourceId),
+          "aria-controls": sourceElementId(sourceId),
         },
       });
-      button.addEventListener("click", () => focusSource(scope, sourceId));
+      button.addEventListener("click", () => focusSource(sourceId));
       nodes.push(button);
     } else {
       nodes.push(
@@ -104,13 +97,7 @@ function buildAnswerNodes(answer, sources, scope) {
 }
 
 function buildMetrics(metrics = {}) {
-  const items = [
-    ["Toplam süre", formatMs(metrics.total_latency_ms)],
-    ["Arama", formatMs(metrics.retrieval_latency_ms)],
-    ["Üretim", formatMs(metrics.generation_latency_ms)],
-    ["Tahmini maliyet", formatCost(metrics.estimated_cost_usd)],
-  ];
-  return items.map(([label, value]) => el("div", {}, [el("dt", { text: label }), el("dd", { text: value })]));
+  return [el("div", {}, [el("dt", { text: "Yanıt süresi" }), el("dd", { text: formatMs(metrics.total_latency_ms) })])];
 }
 
 export function renderAnswer(response) {
@@ -120,19 +107,17 @@ export function renderAnswer(response) {
   setChatState(insufficient ? "insufficient" : "success");
 
   dom.answerTitle.textContent = insufficient ? "Sistemin yanıtı" : "Yanıt";
-  dom.answerMethod.textContent = METHOD_LABELS[response.method] || response.method || "";
-  dom.answerText.replaceChildren(...buildAnswerNodes(response.answer || "", sources, "main"));
+  dom.answerText.replaceChildren(...buildAnswerNodes(response.answer || "", sources));
   dom.answerMetrics.replaceChildren(...buildMetrics(response.metrics));
 
   renderSources(sources, dom.sourceList, {
-    scope: "main",
     countNode: dom.sourcesCount,
     emptyNode: dom.sourcesEmpty,
     insufficient,
   });
 }
 
-function buildSourceCard(source, scope) {
+function buildSourceCard(source) {
   const scores = [el("li", { className: "score", text: `retrieval ${formatScore(source.retrieval_score)}` })];
   if (typeof source.rerank_score === "number") {
     scores.push(el("li", { className: "score", text: `rerank ${formatScore(source.rerank_score)}` }));
@@ -142,7 +127,7 @@ function buildSourceCard(source, scope) {
     "li",
     {
       className: "source-card",
-      attrs: { id: sourceElementId(scope, source.source_id), tabindex: "-1" },
+      attrs: { id: sourceElementId(source.source_id), tabindex: "-1" },
     },
     [
       el("div", { className: "source-card__head" }, [
@@ -160,8 +145,8 @@ function buildSourceCard(source, scope) {
  * @param {Array} sources  AskResponse.sources
  * @param {HTMLElement} container  <ol> veya <ul>
  */
-export function renderSources(sources, container, { scope = "main", countNode, emptyNode, insufficient = false } = {}) {
-  container.replaceChildren(...sources.map((source) => buildSourceCard(source, scope)));
+export function renderSources(sources, container, { countNode, emptyNode, insufficient = false } = {}) {
+  container.replaceChildren(...sources.map(buildSourceCard));
 
   if (countNode) countNode.textContent = sources.length ? `${sources.length} parça` : "";
   if (emptyNode) {
@@ -194,16 +179,6 @@ function readQuestion() {
   return question;
 }
 
-function setFormBusy(busy, activeButton) {
-  inFlight = busy;
-  setButtonBusy(dom.submit, busy && activeButton === dom.submit, "Yanıtlanıyor…");
-  setButtonBusy(dom.compare, busy && activeButton === dom.compare, "Karşılaştırılıyor…");
-  if (busy) {
-    dom.submit.disabled = true;
-    dom.compare.disabled = true;
-  }
-}
-
 export async function submitQuestion(event) {
   if (event) event.preventDefault();
   if (inFlight) return;
@@ -211,78 +186,18 @@ export async function submitQuestion(event) {
   const question = readQuestion();
   if (!question) return;
 
-  const method = dom.method.value;
-  dom.compareSection.hidden = true;
-  setFormBusy(true, dom.submit);
+  inFlight = true;
+  setButtonBusy(dom.submit, true, "Yanıtlanıyor…");
   setChatState("loading");
 
   try {
-    const response = await askQuestion(question, method);
+    const response = await askQuestion(question, STUDENT_METHOD);
     renderAnswer(response);
   } catch (error) {
     setChatState("error", { error });
   } finally {
-    setFormBusy(false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Aynı soruyu dört yöntemle yan yana karşılaştırma
-// ---------------------------------------------------------------------------
-
-function buildCompareColumn(method, outcome) {
-  const header = el("h3", {}, [el("span", { text: METHOD_LABELS[method] })]);
-  const column = el("article", { className: "compare-column", attrs: { "aria-label": METHOD_LABELS[method] } }, [header]);
-
-  if (outcome.status === "rejected") {
-    const box = el("div", { className: "state state--error" });
-    renderError(box, outcome.reason, "Yanıt alınamadı");
-    column.append(box);
-    return column;
-  }
-
-  const response = outcome.value;
-  const sources = Array.isArray(response.sources) ? response.sources : [];
-  const scope = `cmp-${method}`;
-  header.append(el("span", { className: "muted", text: formatMs(response.metrics?.total_latency_ms) }));
-
-  if (response.insufficient_context) {
-    column.append(el("div", { className: "state state--neutral" }, [el("p", { text: "Yeterli bilgi bulunamadı." })]));
-  }
-
-  column.append(
-    el("p", { className: "answer__text" }, buildAnswerNodes(response.answer || "", sources, scope)),
-    el("p", { className: "muted", text: sources.length ? `${sources.length} kaynak parça` : "Kaynak yok" }),
-  );
-  const list = el("ol", { className: "source-list" });
-  renderSources(sources, list, { scope });
-  column.append(list);
-  return column;
-}
-
-async function compareMethods() {
-  if (inFlight) return;
-  const question = readQuestion();
-  if (!question) return;
-
-  setFormBusy(true, dom.compare);
-  setChatState("empty");
-  dom.empty.hidden = true;
-  dom.compareSection.hidden = false;
-  dom.compareQuestion.textContent = `“${question}”`;
-  dom.compareGrid.replaceChildren(
-    el("div", { className: "state state--loading" }, [
-      el("span", { className: "spinner", attrs: { "aria-hidden": "true" } }),
-      el("span", { text: "Dört yöntem aynı anda deneniyor…" }),
-    ]),
-  );
-
-  try {
-    const outcomes = await Promise.allSettled(RETRIEVAL_METHODS.map((method) => askQuestion(question, method)));
-    dom.compareGrid.replaceChildren(...RETRIEVAL_METHODS.map((method, i) => buildCompareColumn(method, outcomes[i])));
-    dom.compareSection.scrollIntoView({ behavior: "smooth", block: "start" });
-  } finally {
-    setFormBusy(false);
+    inFlight = false;
+    setButtonBusy(dom.submit, false);
   }
 }
 
@@ -307,28 +222,21 @@ function init() {
     question: byId("question"),
     questionError: byId("question-error"),
     counter: byId("question-counter"),
-    method: byId("method"),
     submit: byId("ask-submit"),
-    compare: byId("compare-submit"),
     empty: byId("chat-empty"),
     loading: byId("chat-loading"),
     error: byId("chat-error"),
     answer: byId("chat-answer"),
     insufficient: byId("chat-insufficient"),
     answerTitle: byId("answer-title"),
-    answerMethod: byId("answer-method"),
     answerText: byId("answer-text"),
     answerMetrics: byId("answer-metrics"),
     sourceList: byId("source-list"),
     sourcesCount: byId("sources-count"),
     sourcesEmpty: byId("sources-empty"),
-    compareSection: byId("compare-section"),
-    compareGrid: byId("compare-grid"),
-    compareQuestion: byId("compare-question"),
   });
 
   dom.form.addEventListener("submit", submitQuestion);
-  dom.compare.addEventListener("click", compareMethods);
   dom.question.addEventListener("input", updateCounter);
   dom.question.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {

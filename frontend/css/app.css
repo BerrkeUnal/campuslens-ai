@@ -410,6 +410,7 @@ textarea:focus-visible {
   cursor: pointer;
   transition: background var(--transition);
   min-height: 40px;
+  white-space: nowrap;
 }
 
 .button:hover:not(:disabled) {
@@ -545,6 +546,10 @@ textarea:focus-visible {
   border-left-width: 4px;
   background: var(--color-neutral-soft);
   color: var(--color-text);
+}
+
+.card > .state--neutral {
+  margin-bottom: var(--space-4);
 }
 
 .state--neutral h3 {
@@ -688,30 +693,45 @@ textarea:focus-visible {
   background: var(--color-neutral-soft);
 }
 
-/* ---------- Karşılaştırma ızgarası ---------- */
+/* ---------- Admin ana ekranı ---------- */
 
-.compare-grid {
+.admin-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.compare-column {
-  border: 1px solid var(--color-border);
+.link-card {
+  position: relative;
+  transition: border-color var(--transition);
+}
+
+.link-card:hover,
+.link-card:focus-within {
+  border-color: var(--color-primary);
+}
+
+.link-card h2 {
+  margin-bottom: var(--space-2);
+}
+
+.link-card__link {
+  text-decoration: none;
+}
+
+/* Kartın tamamı tıklanabilir */
+.link-card__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   border-radius: var(--radius);
-  padding: var(--space-4);
-  background: var(--color-surface);
-  min-width: 0;
 }
 
-.compare-column h3 {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.compare-column .answer__text {
-  font-size: var(--font-size-base);
+.link-card p:last-child {
+  margin-bottom: 0;
 }
 
 /* ---------- Rozetler ---------- */
