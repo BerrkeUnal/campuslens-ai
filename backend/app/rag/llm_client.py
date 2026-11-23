@@ -5,6 +5,9 @@ from openai import (
     APIConnectionError,
     APITimeoutError,
     AsyncOpenAI,
+    AuthenticationError,
+    BadRequestError,
+    OpenAIError,
     RateLimitError,
 )
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -33,8 +36,15 @@ class LLMClient:
         self.model = settings.llm_model
         self.temperature = settings.llm_temperature
 
+        api_key = settings.openai_api_key
+
+        if not api_key or not api_key.strip():
+            raise LLMClientError(
+                "LLM servisi için API anahtarı yapılandırılmamış."
+            )
+
         self.client = AsyncOpenAI(
-            api_key=settings.openai_api_key or None,
+            api_key=api_key,
             timeout=30.0,
             max_retries=0,
         )
@@ -69,7 +79,20 @@ class LLMClient:
                 raise LLMClientError(
                     "LLM servisinin istek limiti aşıldı."
                 ) from exc
+            except AuthenticationError as exc:
+                raise LLMClientError(
+                    "LLM servisi için kimlik doğrulama başarısız oldu."
+                ) from exc
 
+            except BadRequestError as exc:
+                raise LLMClientError(
+                    "LLM isteği işlenemedi."
+                ) from exc
+
+            except OpenAIError as exc:
+                raise LLMClientError(
+                    "LLM servisinde beklenmeyen bir hata oluştu."
+                ) from exc
             if response.status != "completed":
                 raise LLMClientError(
                     "LLM yanıtı tamamlanamadı."

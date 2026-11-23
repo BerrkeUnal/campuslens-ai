@@ -1,8 +1,10 @@
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from openai import AuthenticationError, BadRequestError, OpenAIError
 
 from backend.app.rag.llm_client import LLMClient, LLMClientError
 
@@ -122,3 +124,122 @@ async def test_llm_fails_after_two_invalid_responses():
         await client.generate("Mock question")
 
     assert mock_create.await_count == 2
+
+def test_llm_rejects_missing_api_key():
+    settings = SimpleNamespace(
+        llm_model="gpt-4.1-mini",
+        llm_temperature=0,
+        openai_api_key="",
+    )
+
+    with patch(
+        "backend.app.rag.llm_client.get_settings",
+        return_value=settings,
+    ), patch(
+        "backend.app.rag.llm_client.AsyncOpenAI"
+    ) as mock_openai:
+        with pytest.raises(
+            LLMClientError,
+            match="API anahtarı yapılandırılmamış",
+        ):
+            LLMClient()
+
+        mock_openai.assert_not_called()
+
+
+def test_llm_rejects_whitespace_api_key():
+    settings = SimpleNamespace(
+        llm_model="gpt-4.1-mini",
+        llm_temperature=0,
+        openai_api_key="   ",
+    )
+
+    with patch(
+        "backend.app.rag.llm_client.get_settings",
+        return_value=settings,
+    ), patch(
+        "backend.app.rag.llm_client.AsyncOpenAI"
+    ) as mock_openai:
+        with pytest.raises(
+            LLMClientError,
+            match="API anahtarı yapılandırılmamış",
+        ):
+            LLMClient()
+
+        mock_openai.assert_not_called()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_type", "expected_message"),
+    [
+        (
+            AuthenticationError,
+            "LLM servisi için kimlik doğrulama başarısız oldu.",
+        ),
+        (
+            BadRequestError,
+            "LLM isteği işlenemedi.",
+        ),
+    ],
+)
+async def test_llm_handles_openai_api_errors(
+    error_type,
+    expected_message,
+):
+    request = httpx.Request(
+        "POST",
+        "https://api.openai.com/v1/responses",
+    )
+
+    response = httpx.Response(
+        status_code=401 if error_type is AuthenticationError else 400,
+        request=request,
+        json={"error": {"message": "SECRET_TECHNICAL_DETAIL"}},
+    )
+
+    api_error = error_type(
+        "SECRET_TECHNICAL_DETAIL",
+        response=response,
+        body=None,
+    )
+
+    client = LLMClient.__new__(LLMClient)
+    client.model = "gpt-4.1-mini"
+    client.temperature = 0
+
+    mock_create = AsyncMock(side_effect=api_error)
+
+    client.client = SimpleNamespace(
+        responses=SimpleNamespace(create=mock_create)
+    )
+
+    with pytest.raises(LLMClientError) as exc_info:
+        await client.generate("Mock question")
+
+    assert str(exc_info.value) == expected_message
+    assert "SECRET_TECHNICAL_DETAIL" not in str(exc_info.value)
+    mock_create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_llm_handles_unexpected_openai_error():
+    client = LLMClient.__new__(LLMClient)
+    client.model = "gpt-4.1-mini"
+    client.temperature = 0
+
+    mock_create = AsyncMock(
+        side_effect=OpenAIError("SECRET_TECHNICAL_DETAIL")
+    )
+
+    client.client = SimpleNamespace(
+        responses=SimpleNamespace(create=mock_create)
+    )
+
+    with pytest.raises(
+        LLMClientError,
+        match="LLM servisinde beklenmeyen bir hata oluştu.",
+    ) as exc_info:
+        await client.generate("Mock question")
+
+    assert "SECRET_TECHNICAL_DETAIL" not in str(exc_info.value)
+    mock_create.assert_awaited_once()
