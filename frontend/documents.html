@@ -1,96 +1,144 @@
 <!doctype html>
-<html lang="tr">
+<html lang="tr" class="auth-pending">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Belgeler · CampusLens AI</title>
+    <meta name="robots" content="noindex" />
+    <title>Belge Yönetimi · CampusLens AI Admin</title>
+    <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/app.css" />
     <script type="module" src="js/documents.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">İçeriğe geç</a>
 
-    <header class="site-header">
-      <div class="site-header__inner">
-        <a class="brand" href="admin.html">CampusLens <span>AI · Admin</span></a>
-        <nav class="nav" aria-label="Admin menüsü">
-          <a href="admin.html">Admin Ana Sayfa</a>
-          <a href="documents.html" aria-current="page">Belgeler</a>
-          <a href="evaluation.html">Değerlendirme</a>
-          <a href="index.html">Öğrenci Ekranı</a>
+    <header class="admin-header">
+      <div class="admin-header__inner">
+        <a class="brand" href="admin.html">
+          <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-cap"></use></svg>
+          <span>CampusLens AI <span class="brand__product">· Admin</span></span>
+        </a>
+        <span class="brand__sub">Üniversite RAG Asistanı</span>
+        <nav class="admin-nav" aria-label="Admin menüsü">
+          <a href="admin.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-home"></use></svg>Genel Bakış</a>
+          <a href="documents.html" aria-current="page"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-files"></use></svg>Belgeler</a>
+          <a href="evaluation.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-chart"></use></svg>Değerlendirme</a>
+          <a href="index.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>Öğrenci Ekranı</a>
         </nav>
-        <div class="header-tools">
-          <span class="health" data-health data-status="unknown" role="status">
-            <span class="health__dot" aria-hidden="true"></span>
-            <span data-health-text>Sunucu kontrol ediliyor…</span>
+        <div class="admin-header__actions">
+          <span class="status-line" data-status="unknown" role="status">
+            <span class="pill__dot" aria-hidden="true"></span>
+            <span data-status-text>Sunucu kontrol ediliyor…</span>
           </span>
-          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+          <button type="button" class="header-button mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+          <button type="button" class="header-button" data-logout>
+            <svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-logout"></use></svg>Çıkış yap
+          </button>
         </div>
       </div>
     </header>
 
-    <main id="main" class="page" tabindex="-1">
-      <div class="page-intro">
-        <h1>Belge yönetimi</h1>
-        <p>
-          Üniversitenin kamuya açık resmî PDF belgelerini yükleyin. Yüklenen belge metne çevrilir, parçalara bölünür
-          ve aramaya hazır hâle getirilir. Yalnızca metin tabanlı PDF'ler desteklenir.
-        </p>
+    <main id="main" class="admin-main" tabindex="-1">
+      <div class="page-head">
+        <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-file"></use></svg></span>
+        <div>
+          <h1>Belge yönetimi</h1>
+          <p>Sistemin yanıtlarında kullanacağı resmî belgeleri yükleyin, yönetin ve indeksleme durumlarını izleyin.</p>
+        </div>
       </div>
 
-      <div class="layout layout--documents">
-        <section class="card" aria-labelledby="upload-heading">
-          <h2 id="upload-heading">PDF yükle</h2>
-          <form id="upload-form" novalidate>
+      <div class="layout-documents">
+        <section class="card" id="upload" aria-labelledby="upload-heading">
+          <h2 id="upload-heading" class="card__title">Yeni belge yükle</h2>
+          <p class="card__subtitle">PDF formatındaki belgeleri sisteme ekleyin. Yüklenen belge metne çevrilir, parçalara bölünür ve aramaya hazır hâle getirilir.</p>
+
+          <form id="upload-form" class="section-spaced" method="post" novalidate>
             <div class="field">
-              <label for="file">PDF dosyası</label>
-              <input id="file" name="file" type="file" accept="application/pdf,.pdf" required aria-describedby="file-hint" />
-              <span id="file-hint" class="field__hint">Yalnızca .pdf, en fazla <span data-max-upload>20</span> MB.</span>
+              <div class="field__label-row">
+                <span class="field__label" id="file-label">PDF dosyası</span>
+                <span class="tag tag--required">Zorunlu</span>
+              </div>
+              <div class="dropzone" id="dropzone">
+                <span class="file-badge" aria-hidden="true">PDF</span>
+                <p class="dropzone__title">PDF dosyanızı sürükleyin veya seçin</p>
+                <p class="dropzone__hint">Yalnızca metin tabanlı .pdf · en fazla <span data-max-upload>20</span> MB</p>
+                <label for="file" class="button button--secondary button--small"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-upload"></use></svg>Dosya seç</label>
+                <input id="file" name="file" type="file" accept=".pdf,application/pdf" aria-labelledby="file-label" aria-describedby="file-error" />
+              </div>
+              <div class="selected-file" id="selected-file" hidden>
+                <span class="file-badge" aria-hidden="true">PDF</span>
+                <div class="selected-file__info">
+                  <p class="selected-file__name" id="selected-file-name"></p>
+                  <p class="muted" id="selected-file-size"></p>
+                </div>
+                <button type="button" class="icon-button" id="selected-file-remove" aria-label="Seçili dosyayı kaldır"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-x"></use></svg></button>
+              </div>
+              <p class="field__error" id="file-error" hidden></p>
             </div>
 
             <div class="field">
-              <label for="title">Belge başlığı</label>
-              <input id="title" name="title" type="text" minlength="2" maxlength="200" required placeholder="Örn. Staj Yönergesi" />
+              <div class="field__label-row">
+                <label for="title">Belge başlığı</label>
+                <span class="tag tag--required">Zorunlu</span>
+              </div>
+              <div class="input-icon">
+                <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-file"></use></svg>
+                <input id="title" name="title" type="text" minlength="2" maxlength="200" placeholder="Örn. Staj Yönergesi" aria-describedby="title-error" />
+              </div>
+              <p class="field__error" id="title-error" hidden></p>
             </div>
 
             <div class="field">
-              <label for="source-url">Kaynak bağlantısı</label>
-              <input
-                id="source-url"
-                name="source_url"
-                type="url"
-                maxlength="2048"
-                required
-                placeholder="https://www.universite.edu.tr/…/belge.pdf"
-                aria-describedby="source-url-hint"
-              />
-              <span id="source-url-hint" class="field__hint">Belgenin resmî sitedeki adresi; yanıtlarda kaynak olarak gösterilir.</span>
+              <div class="field__label-row">
+                <label for="source-url">Resmî kaynak bağlantısı</label>
+                <span class="tag tag--required">Zorunlu</span>
+              </div>
+              <div class="input-icon">
+                <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-external"></use></svg>
+                <input id="source-url" name="source_url" type="url" maxlength="2048" placeholder="https://www.universite.edu.tr/…/belge.pdf" aria-describedby="source-url-hint source-url-error" />
+              </div>
+              <span id="source-url-hint" class="field__hint">Yanıtlarda tıklanabilir kaynak olarak gösterilir.</span>
+              <p class="field__error" id="source-url-error" hidden></p>
             </div>
 
-            <div class="form-actions">
-              <button type="submit" id="upload-submit" class="button">Yükle</button>
-            </div>
+            <button type="submit" id="upload-submit" class="button button--block"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-upload"></use></svg>Belgeyi yükle</button>
           </form>
 
-          <div id="upload-status" class="state section-spaced" role="status" aria-live="polite" hidden></div>
+          <div id="upload-status" class="section-spaced" aria-live="polite" hidden></div>
         </section>
 
-        <section class="card" aria-labelledby="documents-heading">
+        <section class="card" aria-labelledby="library-heading">
           <div class="card__header">
-            <h2 id="documents-heading">Yüklenen belgeler</h2>
+            <div>
+              <h2 id="library-heading" class="card__title"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-layers"></use></svg>Belge kütüphanesi</h2>
+              <p class="card__subtitle">Yüklü belgeleri görüntüleyin, arayın ve yönetin.</p>
+            </div>
             <div class="form-actions">
-              <span id="documents-updated" class="muted" aria-live="polite"></span>
-              <button type="button" id="documents-refresh" class="button button--secondary button--small">Yenile</button>
+              <span class="muted" id="documents-total" aria-live="polite"></span>
+              <button type="button" class="icon-button" id="documents-refresh" aria-label="Listeyi yenile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-refresh"></use></svg></button>
             </div>
           </div>
 
-          <div id="documents-loading" class="state state--loading">
-            <span class="spinner" aria-hidden="true"></span>
-            <span>Belgeler yükleniyor…</span>
+          <div class="toolbar">
+            <div class="input-icon">
+              <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-search"></use></svg>
+              <input id="doc-search" type="search" placeholder="Belge adı veya dosya adı ara…" aria-label="Belgelerde ara" />
+            </div>
+            <select id="status-filter" aria-label="İndeksleme durumuna göre filtrele">
+              <option value="all">Tüm durumlar</option>
+              <option value="indexed">İndekslendi</option>
+              <option value="pending">İndeksleniyor / sırada</option>
+              <option value="failed">Başarısız</option>
+            </select>
           </div>
-          <div id="documents-error" class="state state--error" hidden></div>
-          <div id="documents-empty" class="state state--empty" hidden>
+
+          <div id="documents-loading" class="state state--loading"><span class="spinner" aria-hidden="true"></span><span>Belgeler yükleniyor…</span></div>
+          <div id="documents-error" hidden></div>
+          <div id="documents-empty" class="state" hidden>
             <p>Henüz belge yüklenmedi. Soldaki formdan ilk PDF'i ekleyin.</p>
+          </div>
+          <div id="documents-nomatch" class="state" hidden>
+            <p>Aramanızla eşleşen belge yok.</p>
           </div>
 
           <div id="documents-table-wrap" class="table-wrap" hidden>
@@ -98,23 +146,37 @@
               <caption class="visually-hidden">Yüklenen belgeler ve indeksleme durumları</caption>
               <thead>
                 <tr>
-                  <th scope="col">Belge</th>
-                  <th scope="col">Durum</th>
+                  <th scope="col">Belge adı</th>
+                  <th scope="col">İndeksleme durumu</th>
                   <th scope="col" class="num">Sayfa</th>
                   <th scope="col" class="num">Parça</th>
-                  <th scope="col">Yüklenme</th>
+                  <th scope="col">Yükleme tarihi</th>
                   <th scope="col"><span class="visually-hidden">İşlemler</span></th>
                 </tr>
               </thead>
               <tbody id="documents-body"></tbody>
             </table>
           </div>
+          <p class="muted section-spaced" id="documents-updated" aria-live="polite"></p>
         </section>
       </div>
     </main>
 
-    <footer class="site-footer">
-      CampusLens AI · PDF dosyaları sunucudaki dosya klasöründe, belge bilgileri veritabanında saklanır.
-    </footer>
+    <dialog class="dialog" id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-desc">
+      <div class="dialog__body">
+        <span class="dialog__icon"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-trash"></use></svg></span>
+        <div>
+          <h2 id="delete-title">Belgeyi silmek istiyor musunuz?</h2>
+          <p id="delete-desc" class="muted"></p>
+          <div id="delete-error" hidden></div>
+        </div>
+      </div>
+      <div class="dialog__actions">
+        <button type="button" class="button button--secondary" id="delete-cancel">Vazgeç</button>
+        <button type="button" class="button button--danger" id="delete-confirm">Kalıcı olarak sil</button>
+      </div>
+    </dialog>
+
+    <footer class="site-footer">CampusLens AI · PDF dosyaları sunucudaki dosya klasöründe, belge bilgileri veritabanında saklanır.</footer>
   </body>
 </html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="tr" class="auth-pending">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Admin girişi · CampusLens AI</title>
+    <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="module" src="js/login.js"></script>
+  </head>
+  <body class="auth-page">
+    <main class="auth-wrap">
+      <a class="auth-brand" href="index.html">
+        <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-cap"></use></svg></span>
+        CampusLens AI
+      </a>
+
+      <section class="card auth-card" aria-labelledby="login-heading">
+        <h1 id="login-heading">Admin girişi</h1>
+        <p class="auth-card__desc">Belge yönetimi ve değerlendirme ekranlarına erişmek için yönetici bilgilerinizi girin.</p>
+
+        <div class="notice notice--info" id="demo-info" hidden>
+          <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-info"></use></svg>
+          <div>
+            <p class="notice__title">Demo yönetici girişi</p>
+            <p>Backend kimlik doğrulaması henüz yok; bu giriş yalnızca arayüz akışını gösterir.</p>
+            <p class="demo-credentials">
+              <span>Kullanıcı adı: <code id="demo-username"></code></span>
+              <span>Şifre: <code id="demo-password"></code></span>
+            </p>
+          </div>
+        </div>
+
+        <div id="login-error" hidden></div>
+
+        <form id="login-form" method="post" novalidate>
+          <div class="field">
+            <label for="username">Kullanıcı adı</label>
+            <input
+              id="username"
+              name="username"
+              type="text"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+              aria-describedby="username-error"
+            />
+            <p class="field__error" id="username-error" hidden></p>
+          </div>
+
+          <div class="field">
+            <label for="password">Şifre</label>
+            <div class="password-field">
+              <input id="password" name="password" type="password" autocomplete="current-password" aria-describedby="password-error" />
+              <button
+                type="button"
+                class="icon-button password-toggle"
+                id="password-toggle"
+                aria-controls="password"
+                aria-pressed="false"
+                aria-label="Şifreyi göster"
+              >
+                <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-eye"></use></svg>
+              </button>
+            </div>
+            <p class="field__error" id="password-error" hidden></p>
+          </div>
+
+          <button type="submit" id="login-submit" class="button button--block"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-lock"></use></svg>Giriş yap</button>
+        </form>
+
+        <a class="auth-back" href="index.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-arrow-left"></use></svg>Öğrenci ekranına dön</a>
+      </section>
+
+      <p class="auth-footnote">CampusLens AI · Üniversite belgeleri asistanı</p>
+    </main>
+  </body>
+</html>

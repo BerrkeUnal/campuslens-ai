@@ -1,58 +1,150 @@
 <!doctype html>
-<html lang="tr">
+<html lang="tr" class="auth-pending">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Admin · CampusLens AI</title>
+    <meta name="robots" content="noindex" />
+    <title>Genel Bakış · CampusLens AI Admin</title>
+    <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/app.css" />
     <script type="module" src="js/admin.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">İçeriğe geç</a>
 
-    <header class="site-header">
-      <div class="site-header__inner">
-        <a class="brand" href="admin.html">CampusLens <span>AI · Admin</span></a>
-        <nav class="nav" aria-label="Admin menüsü">
-          <a href="admin.html" aria-current="page">Admin Ana Sayfa</a>
-          <a href="documents.html">Belgeler</a>
-          <a href="evaluation.html">Değerlendirme</a>
-          <a href="index.html">Öğrenci Ekranı</a>
+    <header class="admin-header">
+      <div class="admin-header__inner">
+        <a class="brand" href="admin.html">
+          <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-cap"></use></svg>
+          <span>CampusLens AI <span class="brand__product">· Admin</span></span>
+        </a>
+        <span class="brand__sub">Üniversite RAG Asistanı</span>
+        <nav class="admin-nav" aria-label="Admin menüsü">
+          <a href="admin.html" aria-current="page"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-home"></use></svg>Genel Bakış</a>
+          <a href="documents.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-files"></use></svg>Belgeler</a>
+          <a href="evaluation.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-chart"></use></svg>Değerlendirme</a>
+          <a href="index.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>Öğrenci Ekranı</a>
         </nav>
-        <div class="header-tools">
-          <span class="health" data-health data-status="unknown" role="status">
-            <span class="health__dot" aria-hidden="true"></span>
-            <span data-health-text>Sunucu kontrol ediliyor…</span>
+        <div class="admin-header__actions">
+          <span class="status-line" data-status="unknown" role="status">
+            <span class="pill__dot" aria-hidden="true"></span>
+            <span data-status-text>Sunucu kontrol ediliyor…</span>
           </span>
-          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+          <button type="button" class="header-button mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+          <button type="button" class="header-button" data-logout>
+            <svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-logout"></use></svg>Çıkış yap
+          </button>
         </div>
       </div>
     </header>
 
-    <main id="main" class="page" tabindex="-1">
-      <div class="page-intro">
-        <h1>Admin paneli</h1>
-        <p>Belgeleri yönetin, arama yöntemlerini değerlendirin ve öğrenci ekranını kontrol edin.</p>
+    <main id="main" class="admin-main" tabindex="-1">
+      <h1 class="visually-hidden">Genel bakış</h1>
+
+      <section class="stats" aria-label="Özet">
+        <article class="card stat">
+          <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-file"></use></svg></span>
+          <div>
+            <p class="stat__label">Toplam belge</p>
+            <p class="stat__value" id="stat-documents">—</p>
+            <p class="stat__sub" id="stat-documents-sub">&nbsp;</p>
+          </div>
+        </article>
+        <article class="card stat">
+          <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-layers"></use></svg></span>
+          <div>
+            <p class="stat__label">İndekslenen</p>
+            <p class="stat__value" id="stat-indexed">—</p>
+            <p class="stat__sub" id="stat-indexed-sub">&nbsp;</p>
+          </div>
+        </article>
+        <article class="card stat">
+          <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-grid"></use></svg></span>
+          <div>
+            <p class="stat__label">Toplam parça</p>
+            <p class="stat__value" id="stat-chunks">—</p>
+            <p class="stat__sub">Aramada kullanılan metin parçaları</p>
+          </div>
+        </article>
+        <article class="card stat">
+          <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-activity"></use></svg></span>
+          <div>
+            <p class="stat__label">Sistem durumu</p>
+            <p class="stat__value" id="stat-health"><span class="pill">Kontrol ediliyor</span></p>
+          </div>
+        </article>
+      </section>
+
+      <div class="dash-grid">
+        <section class="card" aria-labelledby="chart-heading">
+          <div class="card__header">
+            <div>
+              <h2 id="chart-heading" class="card__title">Arama yöntemi karşılaştırması</h2>
+              <p class="card__subtitle" id="chart-subtitle">Son tamamlanan değerlendirmede Source Recall@5 (yüksek daha iyi)</p>
+            </div>
+            <a class="link-arrow" href="evaluation.html">Tablo görünümü <svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-arrow-right"></use></svg></a>
+          </div>
+          <div id="method-chart" aria-live="polite">
+            <div class="state state--loading"><span class="spinner" aria-hidden="true"></span><span>Sonuçlar yükleniyor…</span></div>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="health-heading">
+          <div class="card__header">
+            <h2 id="health-heading" class="card__title">Sistem sağlığı</h2>
+            <button type="button" class="icon-button" id="health-refresh" aria-label="Sistem sağlığını yenile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-refresh"></use></svg></button>
+          </div>
+          <ul class="health-list" id="health-list" aria-live="polite"></ul>
+        </section>
       </div>
 
-      <ul class="admin-grid" aria-label="Admin bölümleri">
-        <li class="card link-card">
-          <h2><a class="link-card__link" href="documents.html">Belge yönetimi</a></h2>
-          <p>PDF yükleme, belge listesi, indeksleme durumu ve silme.</p>
-          <p class="link-card__summary muted" id="documents-summary" aria-live="polite">Özet yükleniyor…</p>
-        </li>
-        <li class="card link-card">
-          <h2><a class="link-card__link" href="evaluation.html">Değerlendirme sonuçları</a></h2>
-          <p>BM25, dense, hybrid ve hybrid + rerank yöntemlerini test seti üzerinde karşılaştırma.</p>
-          <p class="link-card__summary muted" id="evaluation-summary" aria-live="polite">Özet yükleniyor…</p>
-        </li>
-        <li class="card link-card">
-          <h2><a class="link-card__link" href="index.html">Öğrenci ekranına dön</a></h2>
-          <p>Öğrencilerin gördüğü soru-cevap ekranı. Sorular hybrid + rerank yöntemiyle yanıtlanır.</p>
-        </li>
-      </ul>
+      <div class="dash-grid">
+        <section class="card" aria-labelledby="recent-heading">
+          <div class="card__header">
+            <h2 id="recent-heading" class="card__title">Son yüklenen belgeler</h2>
+            <a class="link-arrow" href="documents.html">Tüm belgeleri görüntüle <svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-arrow-right"></use></svg></a>
+          </div>
+          <div id="recent-state" class="state state--loading"><span class="spinner" aria-hidden="true"></span><span>Belgeler yükleniyor…</span></div>
+          <div class="table-wrap" id="recent-wrap" hidden>
+            <table class="table--stacked">
+              <caption class="visually-hidden">En son yüklenen beş belge</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Belge adı</th>
+                  <th scope="col">Yüklenme tarihi</th>
+                  <th scope="col" class="num">Parça</th>
+                  <th scope="col">İndeks durumu</th>
+                </tr>
+              </thead>
+              <tbody id="recent-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="actions-heading">
+          <h2 id="actions-heading" class="card__title">Hızlı işlemler</h2>
+          <div class="quick-actions">
+            <a class="quick-action quick-action--primary" href="documents.html#upload">
+              <svg class="icon icon--lg" aria-hidden="true"><use href="img/icons.svg#i-upload"></use></svg>
+              <span>
+                <span class="quick-action__title">Belge yükle</span>
+                <span class="quick-action__desc">PDF, en fazla <span data-max-upload>20</span> MB</span>
+              </span>
+              <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-chevron-right"></use></svg>
+            </a>
+            <a class="quick-action" href="evaluation.html">
+              <svg class="icon icon--lg" aria-hidden="true"><use href="img/icons.svg#i-play"></use></svg>
+              <span>
+                <span class="quick-action__title">Değerlendirme başlat</span>
+                <span class="quick-action__desc">Arama yöntemlerini test sorularında karşılaştır</span>
+              </span>
+              <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-chevron-right"></use></svg>
+            </a>
+          </div>
+        </section>
+      </div>
     </main>
 
-    <footer class="site-footer">CampusLens AI · Admin paneli</footer>
+    <footer class="site-footer">CampusLens AI · Admin paneli · Demo giriş; gerçek yetkilendirme backend tarafında eklenecek.</footer>
   </body>
 </html>

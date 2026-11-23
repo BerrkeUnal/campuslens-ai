@@ -1,6 +1,7 @@
 // Değerlendirme ekranı (evaluation.html)
 // Sözleşme: startEvaluation, refreshResults, renderComparisonTable
 
+import { initAdminShell } from "./admin-shell.js";
 import { METHOD_LABELS, RETRIEVAL_METHODS, getEvaluationResults, runEvaluation } from "./api.js";
 import {
   el,
@@ -9,7 +10,7 @@ import {
   formatDecimal,
   formatMs,
   formatPercent,
-  initPage,
+  icon,
   renderError,
   setButtonBusy,
 } from "./ui.js";
@@ -46,21 +47,21 @@ let lastResults = [];
 /** @param {"idle"|"running"|"completed"|"error"} state */
 function setRunState(state, { message, error } = {}) {
   const box = dom.status;
-  box.className = "state section-spaced";
+  box.className = "section-spaced";
+  box.removeAttribute("role");
   box.hidden = state === "idle";
   setButtonBusy(dom.submit, state === "running", "Çalışıyor…");
 
   if (state === "running") {
-    box.classList.add("state--loading");
+    box.classList.add("notice", "notice--info");
     box.replaceChildren(
       el("span", { className: "spinner", attrs: { "aria-hidden": "true" } }),
       el("span", { text: message }),
     );
   } else if (state === "completed") {
-    box.classList.add("state--success");
-    box.replaceChildren(el("p", { text: message }));
+    box.classList.add("notice", "notice--success");
+    box.replaceChildren(icon("check-circle"), el("div", {}, [el("p", { text: message })]));
   } else if (state === "error") {
-    box.classList.add("state--error");
     renderError(box, error || { message }, "Değerlendirme başlatılamadı");
   }
 }
@@ -89,12 +90,12 @@ export async function startEvaluation(event) {
         : `${started.length} koşu tamamlandı.`,
     });
     if (started.some((run) => run.is_mock)) {
-      dom.status.append(el("p", { className: "muted", text: "Not: backend şu an mock metrik döndürüyor." }));
+      dom.status.lastElementChild.append(el("p", { className: "muted", text: "Not: backend şu an mock metrik döndürüyor." }));
     }
   } catch (error) {
     setRunState("error", { error });
     if (started.length) {
-      dom.status.append(el("p", { className: "state__detail", text: `${started.length} koşu bu hatadan önce başlatıldı.` }));
+      dom.status.lastElementChild.append(el("p", { className: "notice__detail", text: `${started.length} koşu bu hatadan önce başlatıldı.` }));
     }
   } finally {
     running = false;
@@ -180,7 +181,7 @@ export function renderComparisonTable(results, split = dom.split.value) {
     }
 
     const meta = el("div", { className: "muted", text: formatDate(result.completed_at || result.started_at) });
-    if (result.is_mock) meta.append(" ", el("span", { className: "badge badge--mock", text: "mock" }));
+    if (result.is_mock) meta.append(" ", el("span", { className: "pill pill--mock", text: "mock" }));
     nameCell.append(meta);
     return el("tr", {}, [nameCell, ...METRIC_COLUMNS.map((column) => metricCell(column, result.metrics[column.key], best))]);
   });
@@ -201,7 +202,10 @@ function renderHistory(results) {
         el("td", { text: METHOD_LABELS[result.method] || result.method }),
         el("td", { text: SPLIT_LABELS[result.split] || result.split }),
         el("td", {}, [
-          el("span", { className: `badge badge--${result.status}`, text: STATUS_LABELS[result.status] || result.status }),
+          el("span", { className: `pill pill--${result.status}` }, [
+            el("span", { className: "pill__dot", attrs: { "aria-hidden": "true" } }),
+            STATUS_LABELS[result.status] || result.status,
+          ]),
         ]),
         el("td", { className: "num", text: result.metrics?.total_cases ?? "—" }),
         el("td", { className: "num", text: formatPercent(result.metrics?.recall_at_5) }),
@@ -262,7 +266,7 @@ export async function refreshResults({ silent = false } = {}) {
 // ---------------------------------------------------------------------------
 
 function init() {
-  initPage();
+  if (!initAdminShell()) return;
 
   const byId = (id) => document.getElementById(id);
   Object.assign(dom, {
