@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Soru Sor · CampusLens AI</title>
+    <meta name="description" content="Üniversitenin resmî belgelerine dayanarak kaynaklı Türkçe yanıtlar." />
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="module" src="js/chat.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">İçeriğe geç</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html">CampusLens <span>AI</span></a>
+        <nav class="nav" aria-label="Ana menü">
+          <a href="index.html" aria-current="page">Soru Sor</a>
+          <a href="documents.html">Belgeler</a>
+          <a href="evaluation.html">Değerlendirme</a>
+        </nav>
+        <div class="header-tools">
+          <span class="health" data-health data-status="unknown" role="status">
+            <span class="health__dot" aria-hidden="true"></span>
+            <span data-health-text>Sunucu kontrol ediliyor…</span>
+          </span>
+          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page" tabindex="-1">
+      <div class="page-intro">
+        <h1>Belgelere soru sor</h1>
+        <p>
+          Yönetmelik, staj yönergesi, akademik takvim, Erasmus ve mezuniyet belgelerine dayanarak yanıt alın.
+          Her yanıtın altında belge adı, sayfa numarası ve ilgili metin parçası gösterilir.
+        </p>
+      </div>
+
+      <div class="layout layout--chat">
+        <div class="stack">
+          <section class="card" aria-labelledby="ask-heading">
+            <h2 id="ask-heading" class="visually-hidden">Soru formu</h2>
+            <form id="ask-form" novalidate>
+              <div class="field">
+                <div class="field__row">
+                  <label for="question">Sorunuz</label>
+                  <span id="question-counter" class="field__hint" aria-live="polite">0 / 1000</span>
+                </div>
+                <textarea
+                  id="question"
+                  name="question"
+                  maxlength="1000"
+                  required
+                  placeholder="Örn. Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?"
+                  aria-describedby="question-hint question-error"
+                ></textarea>
+                <span id="question-hint" class="field__hint">Göndermek için Ctrl + Enter kullanabilirsiniz.</span>
+                <span id="question-error" class="field__hint" role="alert" hidden></span>
+              </div>
+
+              <ul class="chip-list" aria-label="Örnek sorular">
+                <li><button type="button" class="chip" data-example>Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?</button></li>
+                <li><button type="button" class="chip" data-example>Zorunlu staj kaç iş günüdür?</button></li>
+                <li><button type="button" class="chip" data-example>Erasmus başvurusu için not ortalaması şartı nedir?</button></li>
+                <li><button type="button" class="chip" data-example>Mezuniyet için kaç AKTS gerekir?</button></li>
+              </ul>
+
+              <div class="form-row">
+                <div class="field">
+                  <label for="method">Arama yöntemi</label>
+                  <select id="method" name="method">
+                    <option value="hybrid_rerank" selected>Hybrid + Rerank (önerilen)</option>
+                    <option value="hybrid">Hybrid</option>
+                    <option value="dense">Dense vektör</option>
+                    <option value="bm25">BM25 (anahtar kelime)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" id="ask-submit" class="button">Sor</button>
+                <button type="button" id="compare-submit" class="button button--secondary">4 yöntemle karşılaştır</button>
+              </div>
+            </form>
+          </section>
+
+          <section id="answer-section" aria-labelledby="answer-heading" aria-live="polite">
+            <h2 id="answer-heading" class="visually-hidden">Yanıt</h2>
+
+            <div id="chat-empty" class="state state--empty">
+              <p>Henüz bir soru sormadınız. Sorunuzu yazın; yanıt ve kaynaklar burada görünecek.</p>
+            </div>
+
+            <div id="chat-loading" class="state state--loading" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span>Belgeler taranıyor ve yanıt hazırlanıyor…</span>
+            </div>
+
+            <div id="chat-error" class="state state--error" hidden></div>
+
+            <article id="chat-answer" class="card" hidden>
+              <div id="chat-insufficient" class="state state--neutral" hidden>
+                <h3>Belgelerde yeterli bilgi bulunamadı</h3>
+                <p>
+                  Sistem cevap uydurmak yerine bunu açıkça belirtir. Soruyu farklı ifade etmeyi deneyebilir
+                  veya ilgili birime danışabilirsiniz.
+                </p>
+              </div>
+              <div class="card__header">
+                <h3 id="answer-title">Yanıt</h3>
+                <span id="answer-method" class="badge"></span>
+              </div>
+              <p id="answer-text" class="answer__text"></p>
+              <dl id="answer-metrics" class="metrics"></dl>
+            </article>
+          </section>
+        </div>
+
+        <aside class="card" aria-labelledby="sources-heading">
+          <div class="card__header">
+            <h2 id="sources-heading">Kaynaklar</h2>
+            <span id="sources-count" class="muted"></span>
+          </div>
+          <p id="sources-empty" class="muted">Yanıtta kullanılan belge parçaları burada listelenir.</p>
+          <ol id="source-list" class="source-list" aria-label="Kaynak listesi"></ol>
+        </aside>
+      </div>
+
+      <section id="compare-section" class="card section-spaced" aria-labelledby="compare-heading" hidden>
+        <div class="card__header">
+          <h2 id="compare-heading">Yöntem karşılaştırması</h2>
+          <span id="compare-question" class="muted"></span>
+        </div>
+        <div id="compare-grid" class="compare-grid" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      CampusLens AI · Yanıtlar yalnızca yüklenen resmî belgelere dayanır; kesin işlemler için ilgili birime danışın.
+    </footer>
+  </body>
+</html>
