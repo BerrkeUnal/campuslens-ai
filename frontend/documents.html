@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Belgeler · CampusLens AI</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="module" src="js/documents.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">İçeriğe geç</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html">CampusLens <span>AI</span></a>
+        <nav class="nav" aria-label="Ana menü">
+          <a href="index.html">Soru Sor</a>
+          <a href="documents.html" aria-current="page">Belgeler</a>
+          <a href="evaluation.html">Değerlendirme</a>
+        </nav>
+        <div class="header-tools">
+          <span class="health" data-health data-status="unknown" role="status">
+            <span class="health__dot" aria-hidden="true"></span>
+            <span data-health-text>Sunucu kontrol ediliyor…</span>
+          </span>
+          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page" tabindex="-1">
+      <div class="page-intro">
+        <h1>Belge yönetimi</h1>
+        <p>
+          Üniversitenin kamuya açık resmî PDF belgelerini yükleyin. Yüklenen belge metne çevrilir, parçalara bölünür
+          ve aramaya hazır hâle getirilir. Yalnızca metin tabanlı PDF'ler desteklenir.
+        </p>
+      </div>
+
+      <div class="layout layout--documents">
+        <section class="card" aria-labelledby="upload-heading">
+          <h2 id="upload-heading">PDF yükle</h2>
+          <form id="upload-form" novalidate>
+            <div class="field">
+              <label for="file">PDF dosyası</label>
+              <input id="file" name="file" type="file" accept="application/pdf,.pdf" required aria-describedby="file-hint" />
+              <span id="file-hint" class="field__hint">Yalnızca .pdf, en fazla <span data-max-upload>20</span> MB.</span>
+            </div>
+
+            <div class="field">
+              <label for="title">Belge başlığı</label>
+              <input id="title" name="title" type="text" minlength="2" maxlength="200" required placeholder="Örn. Staj Yönergesi" />
+            </div>
+
+            <div class="field">
+              <label for="source-url">Kaynak bağlantısı</label>
+              <input
+                id="source-url"
+                name="source_url"
+                type="url"
+                maxlength="2048"
+                required
+                placeholder="https://www.universite.edu.tr/…/belge.pdf"
+                aria-describedby="source-url-hint"
+              />
+              <span id="source-url-hint" class="field__hint">Belgenin resmî sitedeki adresi; yanıtlarda kaynak olarak gösterilir.</span>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="upload-submit" class="button">Yükle</button>
+            </div>
+          </form>
+
+          <div id="upload-status" class="state section-spaced" role="status" aria-live="polite" hidden></div>
+        </section>
+
+        <section class="card" aria-labelledby="documents-heading">
+          <div class="card__header">
+            <h2 id="documents-heading">Yüklenen belgeler</h2>
+            <div class="form-actions">
+              <span id="documents-updated" class="muted" aria-live="polite"></span>
+              <button type="button" id="documents-refresh" class="button button--secondary button--small">Yenile</button>
+            </div>
+          </div>
+
+          <div id="documents-loading" class="state state--loading">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Belgeler yükleniyor…</span>
+          </div>
+          <div id="documents-error" class="state state--error" hidden></div>
+          <div id="documents-empty" class="state state--empty" hidden>
+            <p>Henüz belge yüklenmedi. Soldaki formdan ilk PDF'i ekleyin.</p>
+          </div>
+
+          <div id="documents-table-wrap" class="table-wrap" hidden>
+            <table class="table--stacked">
+              <caption class="visually-hidden">Yüklenen belgeler ve indeksleme durumları</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Belge</th>
+                  <th scope="col">Durum</th>
+                  <th scope="col" class="num">Sayfa</th>
+                  <th scope="col" class="num">Parça</th>
+                  <th scope="col">Yüklenme</th>
+                  <th scope="col"><span class="visually-hidden">İşlemler</span></th>
+                </tr>
+              </thead>
+              <tbody id="documents-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      CampusLens AI · PDF dosyaları sunucudaki dosya klasöründe, belge bilgileri veritabanında saklanır.
+    </footer>
+  </body>
+</html>

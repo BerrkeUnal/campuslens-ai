@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Değerlendirme · CampusLens AI</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="module" src="js/evaluation.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">İçeriğe geç</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html">CampusLens <span>AI</span></a>
+        <nav class="nav" aria-label="Ana menü">
+          <a href="index.html">Soru Sor</a>
+          <a href="documents.html">Belgeler</a>
+          <a href="evaluation.html" aria-current="page">Değerlendirme</a>
+        </nav>
+        <div class="header-tools">
+          <span class="health" data-health data-status="unknown" role="status">
+            <span class="health__dot" aria-hidden="true"></span>
+            <span data-health-text>Sunucu kontrol ediliyor…</span>
+          </span>
+          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page" tabindex="-1">
+      <div class="page-intro">
+        <h1>Yöntem değerlendirmesi</h1>
+        <p>
+          Aynı test sorularında BM25, dense, hybrid ve hybrid + rerank yöntemlerini karşılaştırın. Her koşu doğru
+          kaynağı bulma, doğru cevap, uydurma (hallucination) oranı, süre ve maliyet metriklerini üretir.
+        </p>
+      </div>
+
+      <div class="stack">
+        <section class="card" aria-labelledby="run-heading">
+          <h2 id="run-heading">Değerlendirme koşusu başlat</h2>
+          <form id="evaluation-form" novalidate>
+            <div class="form-row">
+              <div class="field">
+                <label for="eval-method">Yöntem</label>
+                <select id="eval-method" name="method">
+                  <option value="all" selected>Dört yöntemin tümü</option>
+                  <option value="hybrid_rerank">Hybrid + Rerank</option>
+                  <option value="hybrid">Hybrid</option>
+                  <option value="dense">Dense vektör</option>
+                  <option value="bm25">BM25 (anahtar kelime)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="eval-split">Soru seti</label>
+                <select id="eval-split" name="split">
+                  <option value="validation" selected>Doğrulama (validation)</option>
+                  <option value="test">Test</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="evaluation-submit" class="button">Değerlendirmeyi başlat</button>
+              <button type="button" id="results-refresh" class="button button--secondary">Sonuçları yenile</button>
+            </div>
+          </form>
+          <div id="evaluation-status" class="state section-spaced" role="status" aria-live="polite" hidden></div>
+        </section>
+
+        <section class="card" aria-labelledby="comparison-heading">
+          <div class="card__header">
+            <h2 id="comparison-heading">Yöntem karşılaştırması</h2>
+            <span id="comparison-split" class="muted"></span>
+          </div>
+
+          <div id="results-loading" class="state state--loading">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Sonuçlar yükleniyor…</span>
+          </div>
+          <div id="results-error" class="state state--error" hidden></div>
+          <div id="results-empty" class="state state--empty" hidden>
+            <p>Bu soru seti için henüz tamamlanmış bir değerlendirme yok. Yukarıdan bir koşu başlatın.</p>
+          </div>
+
+          <div id="comparison-wrap" class="table-wrap" hidden>
+            <table>
+              <caption class="visually-hidden">Her yöntemin en son tamamlanan koşusunun metrikleri</caption>
+              <thead id="comparison-head"></thead>
+              <tbody id="comparison-body"></tbody>
+            </table>
+            <p class="muted section-spaced">
+              Her sütunda en iyi değer yeşil ve kalın gösterilir. Hallucination, süre ve maliyette düşük değer daha
+              iyidir. Answer correctness 0–2 ölçeğindedir.
+            </p>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="history-heading">
+          <h2 id="history-heading">Koşu geçmişi</h2>
+          <p id="history-empty" class="muted">Henüz koşu yok.</p>
+          <div id="history-wrap" class="table-wrap" hidden>
+            <table>
+              <caption class="visually-hidden">Tüm değerlendirme koşuları</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Başlangıç</th>
+                  <th scope="col">Yöntem</th>
+                  <th scope="col">Soru seti</th>
+                  <th scope="col">Durum</th>
+                  <th scope="col" class="num">Soru</th>
+                  <th scope="col" class="num">Recall@5</th>
+                </tr>
+              </thead>
+              <tbody id="history-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">CampusLens AI · Değerlendirme sonuçları veritabanında saklanır.</footer>
+  </body>
+</html>
