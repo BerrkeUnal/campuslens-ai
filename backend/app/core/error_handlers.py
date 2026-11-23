@@ -25,9 +25,15 @@ async def application_error_handler(
     request_id = get_request_id(request)
 
     logger.warning(
-        "Application error request_id=%s code=%s",
+        "Application error request_id=%s code=%s message=%s",
         request_id,
         exception.code,
+        exception.message,
+        exc_info=(
+            type(exception),
+            exception,
+            exception.__traceback__,
+        ),
     )
 
     return JSONResponse(
@@ -61,7 +67,7 @@ async def validation_error_handler(
         )
 
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content={
             "error": "validation_error",
             "message": "İstek alanlarından biri geçersiz.",
