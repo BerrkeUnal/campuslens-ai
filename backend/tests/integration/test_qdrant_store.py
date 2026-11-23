@@ -1,8 +1,9 @@
 """Integration tests for the vector store with real E5/BM25 models.
 
-Qdrant runs in memory by default, so no server is needed. Set
-QDRANT_TEST_URL (e.g. ``http://localhost:6333``) to run the same tests
-against a Qdrant server; every collection a test creates is deleted again.
+Skipped by default so a plain ``pytest`` stays offline and fast. Enable with
+``RUN_QDRANT_INTEGRATION=1`` (downloads the models on first run). Qdrant runs
+in memory unless QDRANT_TEST_URL (e.g. ``http://localhost:6333``) points to
+a server; every collection a test creates is deleted again.
 """
 
 import asyncio
@@ -38,7 +39,15 @@ from backend.app.schemas.retrieval import (
     RetrievedChunk,
 )
 
-pytestmark = pytest.mark.integration
+RUN_INTEGRATION = os.environ.get("RUN_QDRANT_INTEGRATION") == "1"
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not RUN_INTEGRATION,
+        reason="set RUN_QDRANT_INTEGRATION=1 to run tests with real models",
+    ),
+]
 
 FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "sample_chunks.json"
 REGULATION_DOC = "3f1c2a9e-8b7d-4c21-9f3e-1a2b3c4d5e6f"

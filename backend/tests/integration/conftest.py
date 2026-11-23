@@ -1,7 +1,7 @@
 """Shared configuration for integration tests.
 
 Tests marked ``integration`` use real models (downloaded on first run) and a
-Qdrant instance. Deselect them with ``pytest -m "not integration"``.
+Qdrant instance. They are skipped unless ``RUN_QDRANT_INTEGRATION=1`` is set.
 """
 
 import pytest
