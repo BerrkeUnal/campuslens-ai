@@ -3,6 +3,9 @@
 
 import { MOCK_MODE, getHealth, setMockMode } from "./api.js";
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ICON_SPRITE = "img/icons.svg";
+
 /**
  * Güvenli DOM oluşturucu.
  * el("p", { className: "muted", text: "Merhaba", attrs: { id: "x" } }, [child1, child2])
@@ -19,9 +22,21 @@ export function el(tag, { className, text, attrs, dataset } = {}, children = [])
   }
   if (dataset) Object.assign(node.dataset, dataset);
   for (const child of children) {
-    if (child !== null && child !== undefined) node.append(child);
+    if (child !== null && child !== undefined && child !== false) node.append(child);
   }
   return node;
+}
+
+/** img/icons.svg içindeki bir ikonu dekoratif SVG olarak döndürür. */
+export function icon(name, className = "") {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", `icon ${className}`.trim());
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `${ICON_SPRITE}#i-${name}`);
+  svg.append(use);
+  return svg;
 }
 
 /** Yalnızca http(s) bağlantılarına izin ver; javascript: vb. engellenir. */
@@ -34,10 +49,11 @@ export function safeUrl(value) {
   }
 }
 
-export function externalLink(href, text) {
+export function externalLink(href, children, className) {
   const url = safeUrl(href);
-  if (!url) return el("span", { text });
-  return el("a", { text, attrs: { href: url, target: "_blank", rel: "noopener noreferrer" } });
+  const content = Array.isArray(children) ? children : [children];
+  if (!url) return el("span", { className }, content);
+  return el("a", { className, attrs: { href: url, target: "_blank", rel: "noopener noreferrer" } }, content);
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +62,11 @@ export function externalLink(href, text) {
 
 const numberTr = (digits) =>
   new Intl.NumberFormat("tr-TR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+export function formatNumber(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return new Intl.NumberFormat("tr-TR").format(value);
+}
 
 export function formatMs(value) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
@@ -77,7 +98,13 @@ export function formatDate(value) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(date);
+  return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+export function formatBytes(bytes) {
+  if (typeof bytes !== "number") return "";
+  if (bytes < 1024 * 1024) return `${numberTr(0).format(Math.max(1, bytes / 1024))} KB`;
+  return `${numberTr(1).format(bytes / (1024 * 1024))} MB`;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,58 +114,69 @@ export function formatDate(value) {
 export function setButtonBusy(button, busy, busyLabel) {
   if (!button) return;
   if (busy) {
-    if (!button.dataset.label) button.dataset.label = button.textContent;
+    if (!button.dataset.busy) {
+      button.dataset.busy = "true";
+      button._originalChildren = [...button.childNodes];
+    }
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
-    button.replaceChildren(el("span", { className: "spinner", attrs: { "aria-hidden": "true" } }), busyLabel || button.dataset.label);
-  } else {
+    button.replaceChildren(
+      el("span", { className: "spinner", attrs: { "aria-hidden": "true" } }),
+      busyLabel || button.textContent.trim(),
+    );
+  } else if (button.dataset.busy) {
+    delete button.dataset.busy;
     button.disabled = false;
     button.removeAttribute("aria-busy");
-    if (button.dataset.label) button.textContent = button.dataset.label;
+    if (button._originalChildren) button.replaceChildren(...button._originalChildren);
+  } else {
+    button.disabled = false;
   }
 }
 
-/** Hata kutusu: başlık + mesaj + varsa istek kimliği */
+/** Hata kutusu: ikon + başlık + mesaj + varsa istek kimliği */
 export function renderError(container, error, title = "Bir sorun oluştu") {
   const message = (error && error.message) || "Bilinmeyen bir hata oluştu.";
-  const children = [el("h3", { text: title }), el("p", { text: message })];
+  const text = el("div", {}, [el("p", { className: "notice__title", text: title }), el("p", { text: message })]);
   if (error && error.requestId) {
-    children.push(el("p", { className: "state__detail", text: `İstek kimliği: ${error.requestId}` }));
+    text.append(el("p", { className: "notice__detail", text: `İstek kimliği: ${error.requestId}` }));
   }
-  container.replaceChildren(...children);
+  container.classList.add("notice", "notice--error");
+  container.setAttribute("role", "alert");
+  container.replaceChildren(icon("alert"), text);
 }
 
 // ---------------------------------------------------------------------------
-// Ortak üst bar: aktif sayfa, sağlık göstergesi, mock düğmesi
+// Sunucu durumu ve mock düğmesi
 // ---------------------------------------------------------------------------
 
-export function initPage() {
-  const health = document.querySelector("[data-health]");
-  const healthText = document.querySelector("[data-health-text]");
-  const toggle = document.querySelector("[data-mock-toggle]");
-
-  if (toggle) {
-    toggle.setAttribute("aria-pressed", String(MOCK_MODE));
-    toggle.textContent = MOCK_MODE ? "Mock: açık" : "Mock: kapalı";
-    toggle.addEventListener("click", () => setMockMode(!MOCK_MODE));
-  }
-
-  if (!health || !healthText) return;
+/**
+ * Üst bardaki küçük sunucu durumu göstergesi.
+ * quietWhenOk: öğrenci ekranında her şey yolundaysa gösterge gizlenir.
+ */
+export function initStatus(node, { quietWhenOk = false, hideWhenMock = false } = {}) {
+  if (!node) return;
+  const text = node.querySelector("[data-status-text]");
+  const set = (status, label) => {
+    node.dataset.status = status;
+    if (text) text.textContent = label;
+    node.hidden = quietWhenOk && (status === "ok" || status === "unknown");
+  };
 
   if (MOCK_MODE) {
-    health.dataset.status = "mock";
-    healthText.textContent = "Mock veri kullanılıyor";
+    set("mock", "Mock veri kullanılıyor");
+    if (hideWhenMock) node.hidden = true; // admin üst barında mock düğmesi bunu zaten gösterir
     return;
   }
-
-  healthText.textContent = "Sunucu kontrol ediliyor…";
+  set("unknown", "Sunucu kontrol ediliyor…");
   getHealth()
-    .then(() => {
-      health.dataset.status = "ok";
-      healthText.textContent = "Sunucu çalışıyor";
-    })
-    .catch(() => {
-      health.dataset.status = "down";
-      healthText.textContent = "Sunucuya ulaşılamıyor";
-    });
+    .then(() => set("ok", "Sunucu çalışıyor"))
+    .catch(() => set("down", "Sunucuya ulaşılamıyor"));
+}
+
+export function initMockToggle(button) {
+  if (!button) return;
+  button.setAttribute("aria-pressed", String(MOCK_MODE));
+  button.textContent = MOCK_MODE ? "Mock: açık" : "Mock: kapalı";
+  button.addEventListener("click", () => setMockMode(!MOCK_MODE));
 }

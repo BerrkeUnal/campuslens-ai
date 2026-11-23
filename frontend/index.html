@@ -3,117 +3,131 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Soru Sor · CampusLens AI</title>
+    <title>CampusLens AI · Üniversite belgeleri asistanı</title>
     <meta name="description" content="Üniversitenin resmî belgelerine dayanarak kaynaklı Türkçe yanıtlar." />
+    <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/app.css" />
     <script type="module" src="js/chat.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">İçeriğe geç</a>
+    <a class="skip-link" href="#question">Soru alanına geç</a>
 
-    <header class="site-header">
-      <div class="site-header__inner">
-        <a class="brand" href="index.html">CampusLens <span>AI</span></a>
-        <nav class="nav" aria-label="Ana menü">
-          <a href="index.html" aria-current="page">Soru Sor</a>
-        </nav>
-        <div class="header-tools">
-          <span class="health" data-health data-status="unknown" role="status">
-            <span class="health__dot" aria-hidden="true"></span>
-            <span data-health-text>Sunucu kontrol ediliyor…</span>
-          </span>
-        </div>
-      </div>
-    </header>
-
-    <main id="main" class="page" tabindex="-1">
-      <div class="page-intro">
-        <h1>Belgelere soru sor</h1>
-        <p>
-          Yönetmelik, staj yönergesi, akademik takvim, Erasmus ve mezuniyet belgelerine dayanarak yanıt alın.
-          Her yanıtın altında belge adı, sayfa numarası ve ilgili metin parçası gösterilir.
-        </p>
-      </div>
-
-      <div class="layout layout--chat">
-        <div class="stack">
-          <section class="card" aria-labelledby="ask-heading">
-            <h2 id="ask-heading" class="visually-hidden">Soru formu</h2>
-            <form id="ask-form" novalidate>
-              <div class="field">
-                <div class="field__row">
-                  <label for="question">Sorunuz</label>
-                  <span id="question-counter" class="field__hint" aria-live="polite">0 / 1000</span>
-                </div>
-                <textarea
-                  id="question"
-                  name="question"
-                  maxlength="1000"
-                  required
-                  placeholder="Örn. Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?"
-                  aria-describedby="question-hint question-error"
-                ></textarea>
-                <span id="question-hint" class="field__hint">Göndermek için Ctrl + Enter kullanabilirsiniz.</span>
-                <span id="question-error" class="field__hint" role="alert" hidden></span>
-              </div>
-
-              <ul class="chip-list" aria-label="Örnek sorular">
-                <li><button type="button" class="chip" data-example>Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?</button></li>
-                <li><button type="button" class="chip" data-example>Zorunlu staj kaç iş günüdür?</button></li>
-                <li><button type="button" class="chip" data-example>Erasmus başvurusu için not ortalaması şartı nedir?</button></li>
-                <li><button type="button" class="chip" data-example>Mezuniyet için kaç AKTS gerekir?</button></li>
-              </ul>
-
-              <div class="form-actions">
-                <button type="submit" id="ask-submit" class="button">Sor</button>
-              </div>
-            </form>
-          </section>
-
-          <section id="answer-section" aria-labelledby="answer-heading" aria-live="polite">
-            <h2 id="answer-heading" class="visually-hidden">Yanıt</h2>
-
-            <div id="chat-empty" class="state state--empty">
-              <p>Henüz bir soru sormadınız. Sorunuzu yazın; yanıt ve kaynaklar burada görünecek.</p>
-            </div>
-
-            <div id="chat-loading" class="state state--loading" hidden>
-              <span class="spinner" aria-hidden="true"></span>
-              <span>Belgeler taranıyor ve yanıt hazırlanıyor…</span>
-            </div>
-
-            <div id="chat-error" class="state state--error" hidden></div>
-
-            <article id="chat-answer" class="card" hidden>
-              <div id="chat-insufficient" class="state state--neutral" hidden>
-                <h3>Belgelerde yeterli bilgi bulunamadı</h3>
-                <p>
-                  Sistem cevap uydurmak yerine bunu açıkça belirtir. Soruyu farklı ifade etmeyi deneyebilir
-                  veya ilgili birime danışabilirsiniz.
-                </p>
-              </div>
-              <div class="card__header">
-                <h3 id="answer-title">Yanıt</h3>
-              </div>
-              <p id="answer-text" class="answer__text"></p>
-              <dl id="answer-metrics" class="metrics"></dl>
-            </article>
-          </section>
-        </div>
-
-        <aside class="card" aria-labelledby="sources-heading">
-          <div class="card__header">
-            <h2 id="sources-heading">Kaynaklar</h2>
-            <span id="sources-count" class="muted"></span>
+    <div class="student-app">
+      <aside class="sidebar" aria-label="CampusLens menüsü">
+        <div class="sidebar__head">
+          <div>
+            <a class="brand" href="index.html"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-cap"></use></svg>CampusLens AI</a>
+            <p class="brand__tagline">Üniversite belgelerinde doğru cevabı bulun</p>
           </div>
-          <p id="sources-empty" class="muted">Yanıtta kullanılan belge parçaları burada listelenir.</p>
-          <ol id="source-list" class="source-list" aria-label="Kaynak listesi"></ol>
-        </aside>
-      </div>
-    </main>
+          <button type="button" class="icon-button sidebar__toggle" id="sidebar-toggle" aria-expanded="false" aria-controls="sidebar-menu" aria-label="Menüyü aç">
+            <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-menu"></use></svg>
+          </button>
+        </div>
 
-    <footer class="site-footer">
-      CampusLens AI · Yanıtlar yalnızca yüklenen resmî belgelere dayanır; kesin işlemler için ilgili birime danışın.
-    </footer>
+        <button type="button" class="button button--new-chat" id="new-chat"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-plus"></use></svg>Yeni sohbet</button>
+
+        <div class="sidebar__menu" id="sidebar-menu">
+          <nav aria-labelledby="topics-heading">
+            <h2 class="sidebar__section-title" id="topics-heading">Hızlı sorular</h2>
+            <ul class="topic-list">
+              <li>
+                <button type="button" class="topic" data-question="Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?">
+                  <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>
+                  <span><span class="topic__title">Yönetmelik</span><span class="topic__question">Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?</span></span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="topic" data-question="Zorunlu staj kaç iş günüdür?">
+                  <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>
+                  <span><span class="topic__title">Staj</span><span class="topic__question">Zorunlu staj kaç iş günüdür?</span></span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="topic" data-question="Erasmus başvurusu için not ortalaması şartı nedir?">
+                  <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>
+                  <span><span class="topic__title">Erasmus</span><span class="topic__question">Erasmus başvurusu için not ortalaması şartı nedir?</span></span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="topic" data-question="Mezuniyet için kaç AKTS gerekir?">
+                  <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>
+                  <span><span class="topic__title">Mezuniyet</span><span class="topic__question">Mezuniyet için kaç AKTS gerekir?</span></span>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="topic" data-question="Güz dönemi final sınavları ne zaman başlıyor?">
+                  <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg>
+                  <span><span class="topic__title">Akademik takvim</span><span class="topic__question">Güz dönemi final sınavları ne zaman başlıyor?</span></span>
+                </button>
+              </li>
+            </ul>
+          </nav>
+
+          <div class="sidebar__footer">
+            <a class="admin-link" href="admin-login.html"><svg class="icon icon--sm" aria-hidden="true"><use href="img/icons.svg#i-lock"></use></svg>Admin girişi</a>
+          </div>
+        </div>
+      </aside>
+
+      <main class="chat" id="main">
+        <header class="chat__topbar">
+          <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-cap"></use></svg>
+          <p class="chat__greeting">Merhaba! CampusLens AI ile üniversite yönetmelik ve yönergelerindeki sorularınıza kaynaklı yanıt alabilirsiniz.</p>
+          <span class="chat__status status-line" data-status="unknown" role="status" hidden>
+            <span class="pill__dot" aria-hidden="true"></span>
+            <span data-status-text></span>
+          </span>
+        </header>
+
+        <section class="chat__thread" id="thread-scroll" aria-label="Sohbet">
+          <div class="thread" id="thread" role="log" aria-live="polite" aria-relevant="additions">
+            <div class="welcome" id="welcome">
+              <span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-cap"></use></svg></span>
+              <h1>Üniversite belgeleri hakkında soru sorun</h1>
+              <p>Yanıtlar yönetmelik, staj yönergesi, akademik takvim, Erasmus ve mezuniyet belgelerine dayanır. Her yanıtın kaynağı sağdaki panelde gösterilir.</p>
+              <ul class="suggestions" aria-label="Örnek sorular">
+              <li><button type="button" class="suggestion" data-question="Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg><span>Devamsızlıktan kaldığım dersin bütünleme sınavına girebilir miyim?</span></button></li>
+              <li><button type="button" class="suggestion" data-question="Zorunlu staj kaç iş günüdür?"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg><span>Zorunlu staj kaç iş günüdür?</span></button></li>
+              <li><button type="button" class="suggestion" data-question="Erasmus başvurusu için not ortalaması şartı nedir?"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg><span>Erasmus başvurusu için not ortalaması şartı nedir?</span></button></li>
+              <li><button type="button" class="suggestion" data-question="Mezuniyet için kaç AKTS gerekir?"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-message"></use></svg><span>Mezuniyet için kaç AKTS gerekir?</span></button></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <aside class="sources" id="sources" aria-labelledby="sources-heading">
+          <div class="sources__header">
+            <h2 id="sources-heading"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-book"></use></svg>Kaynaklar</h2>
+            <span class="muted" id="sources-count"></span>
+          </div>
+          <p class="sources__note" id="sources-note" hidden></p>
+          <div class="sources__empty" id="sources-empty">
+            <svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-file"></use></svg>
+            <p>Yanıtta kullanılan belge parçaları burada belge adı ve sayfa numarasıyla listelenir.</p>
+          </div>
+          <ol class="source-list" id="source-list" aria-label="Kaynak listesi"></ol>
+        </aside>
+
+        <div class="composer-wrap">
+          <form class="composer" id="ask-form" method="post" novalidate>
+            <label for="question" class="visually-hidden">Sorunuz</label>
+            <textarea
+              id="question"
+              name="question"
+              rows="1"
+              maxlength="1000"
+              placeholder="Sorunuzu yazın…"
+              aria-describedby="composer-hint question-error"
+            ></textarea>
+            <button type="submit" class="send-button" id="ask-submit" aria-label="Soruyu gönder"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-send"></use></svg></button>
+          </form>
+          <div class="composer__footer">
+            <span id="composer-hint">Enter ile gönderin, Shift + Enter ile yeni satır.</span>
+            <span id="question-counter" aria-live="polite"></span>
+          </div>
+          <p class="field__error composer__error" id="question-error" role="alert" hidden></p>
+        </div>
+      </main>
+    </div>
   </body>
 </html>

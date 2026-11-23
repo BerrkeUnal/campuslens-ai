@@ -7,6 +7,19 @@
 //   - Soru "#hata" içeriyorsa      -> 503 servis hatası
 //   - Belge başlığı "hata" içeriyorsa -> indeksleme "failed" ile biter
 
+// ---------------------------------------------------------------------------
+// Demo yönetici girişi (YALNIZCA DEMO VERİSİ)
+// Bu değerler bir sır değildir ve gerçek bir hesaba ait değildir. Backend'de
+// kimlik doğrulama olmadığı için admin giriş ekranının akışını göstermek amacıyla
+// kullanılır. Giriş ekranında yalnızca mock modu açıkken gösterilir.
+// Gerçek kullanıcı adı veya şifre bu dosyaya ya da herhangi bir JS dosyasına yazılmamalıdır.
+// ---------------------------------------------------------------------------
+
+export const DEMO_ADMIN_CREDENTIALS = Object.freeze({
+  username: "admin",
+  password: "campuslens-demo",
+});
+
 export const mockAskResponse = {
   request_id: "demo-001",
   answer:
@@ -150,7 +163,30 @@ function uuid() {
 
 const now = Date.now();
 
-const documents = [
+// Mock durumu sekme boyunca korunur (sessionStorage); sayfa değişince yüklenen belgeler kaybolmaz.
+const MOCK_STATE_KEY = "campuslens.mock.state";
+
+function loadMockState() {
+  try {
+    const state = JSON.parse(window.sessionStorage.getItem(MOCK_STATE_KEY) || "null");
+    if (state && Array.isArray(state.documents) && Array.isArray(state.evaluationResults)) return state;
+  } catch {
+    /* bozuk veya erişilemeyen depolama: varsayılanlarla devam */
+  }
+  return null;
+}
+
+function saveMockState() {
+  try {
+    window.sessionStorage.setItem(MOCK_STATE_KEY, JSON.stringify({ documents, evaluationResults }));
+  } catch {
+    /* yoksay */
+  }
+}
+
+const savedState = loadMockState();
+
+const documents = savedState?.documents ?? [
   {
     document_id: uuid(),
     title: "Önlisans ve Lisans Eğitim-Öğretim Yönetmeliği",
@@ -173,7 +209,7 @@ const documents = [
   },
 ];
 
-const evaluationResults = [];
+const evaluationResults = savedState?.evaluationResults ?? [];
 
 // Mock belgelerin durumu yüklenme anından geçen süreye göre ilerler:
 // 0-2 sn uploaded, 2-6 sn processing, sonra indexed (veya failed).
@@ -247,6 +283,7 @@ export const mockApi = {
       will_fail: title.toLocaleLowerCase("tr").includes("hata"),
     };
     documents.unshift(doc);
+    saveMockState();
     return toDocumentResponse(doc);
   },
 
@@ -266,6 +303,7 @@ export const mockApi = {
       throw mockError(404, "http_error", "Belge bulunamadı.");
     }
     documents.splice(index, 1);
+    saveMockState();
     return null;
   },
 
@@ -283,6 +321,7 @@ export const mockApi = {
       completed_at: new Date().toISOString(),
     };
     evaluationResults.unshift(result);
+    saveMockState();
     const { metrics, completed_at: _completedAt, ...runResponse } = result;
     return runResponse;
   },
