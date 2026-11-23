@@ -16,15 +16,12 @@
         <a class="brand" href="index.html">CampusLens <span>AI</span></a>
         <nav class="nav" aria-label="Ana menü">
           <a href="index.html" aria-current="page">Soru Sor</a>
-          <a href="documents.html">Belgeler</a>
-          <a href="evaluation.html">Değerlendirme</a>
         </nav>
         <div class="header-tools">
           <span class="health" data-health data-status="unknown" role="status">
             <span class="health__dot" aria-hidden="true"></span>
             <span data-health-text>Sunucu kontrol ediliyor…</span>
           </span>
-          <button type="button" class="mock-toggle" data-mock-toggle aria-pressed="false">Mock: kapalı</button>
         </div>
       </div>
     </header>
@@ -67,21 +64,8 @@
                 <li><button type="button" class="chip" data-example>Mezuniyet için kaç AKTS gerekir?</button></li>
               </ul>
 
-              <div class="form-row">
-                <div class="field">
-                  <label for="method">Arama yöntemi</label>
-                  <select id="method" name="method">
-                    <option value="hybrid_rerank" selected>Hybrid + Rerank (önerilen)</option>
-                    <option value="hybrid">Hybrid</option>
-                    <option value="dense">Dense vektör</option>
-                    <option value="bm25">BM25 (anahtar kelime)</option>
-                  </select>
-                </div>
-              </div>
-
               <div class="form-actions">
                 <button type="submit" id="ask-submit" class="button">Sor</button>
-                <button type="button" id="compare-submit" class="button button--secondary">4 yöntemle karşılaştır</button>
               </div>
             </form>
           </section>
@@ -110,7 +94,6 @@
               </div>
               <div class="card__header">
                 <h3 id="answer-title">Yanıt</h3>
-                <span id="answer-method" class="badge"></span>
               </div>
               <p id="answer-text" class="answer__text"></p>
               <dl id="answer-metrics" class="metrics"></dl>
@@ -127,14 +110,6 @@
           <ol id="source-list" class="source-list" aria-label="Kaynak listesi"></ol>
         </aside>
       </div>
-
-      <section id="compare-section" class="card section-spaced" aria-labelledby="compare-heading" hidden>
-        <div class="card__header">
-          <h2 id="compare-heading">Yöntem karşılaştırması</h2>
-          <span id="compare-question" class="muted"></span>
-        </div>
-        <div id="compare-grid" class="compare-grid" aria-live="polite"></div>
-      </section>
     </main>
 
     <footer class="site-footer">
