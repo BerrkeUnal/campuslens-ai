@@ -410,6 +410,7 @@ textarea:focus-visible {
   cursor: pointer;
   transition: background var(--transition);
   min-height: 40px;
+  white-space: nowrap;
 }
 
 .button:hover:not(:disabled) {
@@ -545,6 +546,10 @@ textarea:focus-visible {
   border-left-width: 4px;
   background: var(--color-neutral-soft);
   color: var(--color-text);
+}
+
+.card > .state--neutral {
+  margin-bottom: var(--space-4);
 }
 
 .state--neutral h3 {
