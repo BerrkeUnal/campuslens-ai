@@ -25,6 +25,20 @@ class LLMOutput(BaseModel):
     insufficient_context: bool
 
 
+class LLMUsage(BaseModel):
+    """Token usage reported by the LLM API."""
+
+    input_tokens: int
+    output_tokens: int
+
+
+class LLMGenerationResult(BaseModel):
+    """Structured answer with optional API usage metadata."""
+
+    output: LLMOutput
+    usage: LLMUsage | None = None
+
+
 class LLMClientError(ServiceUnavailableError):
     """Raised when LLM generation fails (HTTP 503)."""
 
@@ -54,8 +68,23 @@ class LLMClient:
             max_retries=0,
         )
 
+    async def aclose(self) -> None:
+        """Close the underlying asynchronous OpenAI client."""
+        await self.client.close()
+
     async def generate(self, user_prompt: str) -> LLMOutput:
-        """Generate structured JSON, retrying invalid output once."""
+        """Generate a structured answer using the existing interface."""
+        result = await self.generate_with_usage(user_prompt)
+        return result.output
+
+    async def generate_with_usage(
+        self,
+        user_prompt: str,
+    ) -> LLMGenerationResult:
+        """Generate structured JSON and collect token usage across attempts."""
+        input_tokens = 0
+        output_tokens = 0
+        usage_available = True
 
         for attempt in range(2):
             try:
@@ -97,9 +126,31 @@ class LLMClient:
             if response.status != "completed":
                 raise LLMClientError("LLM yanıtı tamamlanamadı.")
 
+            usage = getattr(response, "usage", None)
+
+            if usage is None:
+                usage_available = False
+            else:
+                input_tokens += usage.input_tokens
+                output_tokens += usage.output_tokens
+
             try:
                 data = json.loads(response.output_text)
-                return LLMOutput.model_validate(data)
+                output = LLMOutput.model_validate(data)
+
+                total_usage = (
+                    LLMUsage(
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
+                    if usage_available
+                    else None
+                )
+
+                return LLMGenerationResult(
+                    output=output,
+                    usage=total_usage,
+                )
 
             except (json.JSONDecodeError, ValidationError) as exc:
                 if attempt == 1:

@@ -2,6 +2,15 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Standard API prices in USD per one million tokens.
+# Reference: https://openai.com/api/pricing/
+LLM_MODEL_PRICES_USD_PER_1M_TOKENS = {
+    "gpt-4.1-mini": {
+        "input": 0.40,
+        "output": 1.60,
+    },
+}
+
 
 class Settings(BaseSettings):
     app_env: str = "development"
