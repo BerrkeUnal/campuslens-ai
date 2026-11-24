@@ -27,11 +27,11 @@ class EvaluationMetricsResponse(BaseModel):
     total_cases: int = Field(ge=0)
     recall_at_5: float = Field(ge=0, le=1)
     mrr_at_5: float = Field(ge=0, le=1)
-    answer_correctness: float = Field(ge=0, le=2)
-    hallucination_rate: float = Field(ge=0, le=1)
-    abstention_accuracy: float = Field(ge=0, le=1)
+    answer_correctness: float | None = Field(default=None, ge=0, le=2)
+    hallucination_rate: float | None = Field(default=None, ge=0, le=1)
+    abstention_accuracy: float | None = Field(default=None, ge=0, le=1)
     average_latency_ms: float = Field(ge=0)
-    total_cost_usd: float = Field(ge=0)
+    total_cost_usd: float | None = Field(default=None, ge=0)
 
 
 class EvaluationRunResponse(BaseModel):
@@ -52,6 +52,7 @@ class EvaluationResultResponse(BaseModel):
     is_mock: bool
     started_at: datetime
     completed_at: datetime | None
+    error_message: str | None = None
 
 
 class EvaluationResultListResponse(BaseModel):
