@@ -15,6 +15,7 @@ async def test_document_lifecycle_survives_reopening_database(tmp_path: Path) ->
     database = SQLiteDatabase(url)
     await database.initialize()
     await database.initialize()
+    assert await database.health_status() == "ok"
     service = SQLiteDocumentService(database)
     official_url = "https://example.edu.tr/y%C3%B6netmelik.pdf?version=1"
     document = await service.create_document(
@@ -24,7 +25,9 @@ async def test_document_lifecycle_survives_reopening_database(tmp_path: Path) ->
     assert document.status is DocumentStatus.UPLOADED
     assert database.path.is_file()
     with pytest.raises(ServiceUnavailableError):
-        await service.update_document_status(document.document_id, DocumentStatus.PROCESSING, 0)
+        await service.update_document_status(
+            document.document_id, DocumentStatus.PROCESSING, 0
+        )
     assert await service.get_document(document.document_id) == document
 
     processing = await service.update_document_status(
@@ -37,7 +40,9 @@ async def test_document_lifecycle_survives_reopening_database(tmp_path: Path) ->
     )
     assert failed is not None
     assert failed.error_message == "PDF cannot be read."
-    indexed = await service.update_document_status(document.document_id, DocumentStatus.INDEXED)
+    indexed = await service.update_document_status(
+        document.document_id, DocumentStatus.INDEXED
+    )
     assert indexed is not None
     assert indexed.error_message is None
 
@@ -57,8 +62,11 @@ async def test_document_lifecycle_survives_reopening_database(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_database_open_failure_is_reported_as_service_unavailable(tmp_path: Path) -> None:
+async def test_database_open_failure_is_reported_as_service_unavailable(
+    tmp_path: Path,
+) -> None:
     database = SQLiteDatabase(f"sqlite:///{tmp_path.as_posix()}")
+    assert await database.health_status() == "unavailable"
     with pytest.raises(ServiceUnavailableError) as exc:
         await database.initialize()
     assert exc.value.status_code == 503

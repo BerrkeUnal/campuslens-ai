@@ -1,3 +1,4 @@
+import logging
 from asyncio import to_thread
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,6 +8,8 @@ import aiosqlite
 from fastapi import Request
 
 from backend.app.core.exceptions import ServiceUnavailableError
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -48,7 +51,11 @@ CREATE TABLE IF NOT EXISTS evaluation_case_results (
 class SQLiteDatabase:
     def __init__(self, url: str) -> None:
         scheme, separator, file_path = url.partition(":///")
-        if not separator or scheme not in {"sqlite", "sqlite+aiosqlite"} or not file_path:
+        if (
+            not separator
+            or scheme not in {"sqlite", "sqlite+aiosqlite"}
+            or not file_path
+        ):
             raise ValueError("DATABASE_URL must point to a SQLite file.")
         if file_path == ":memory:":
             raise ValueError("Use a temporary SQLite file for an isolated database.")
@@ -70,9 +77,28 @@ class SQLiteDatabase:
             await to_thread(self.path.parent.mkdir, parents=True, exist_ok=True)
         except OSError as exc:
             raise ServiceUnavailableError("SQLite") from exc
+
         async with self.connect() as connection:
             await connection.executescript(SCHEMA)
             await connection.commit()
+
+    async def health_status(self) -> str:
+        """Return the SQLite availability without raising an exception."""
+        try:
+            async with self.connect() as connection:
+                async with connection.execute("SELECT 1") as cursor:
+                    row = await cursor.fetchone()
+
+            if row is not None and row[0] == 1:
+                return "ok"
+
+        except Exception:
+            logger.warning(
+                "SQLite health check failed",
+                exc_info=True,
+            )
+
+        return "unavailable"
 
 
 def get_database(request: Request) -> SQLiteDatabase:
