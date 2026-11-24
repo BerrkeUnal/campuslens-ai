@@ -117,7 +117,10 @@ async def answer_with_sources(
 ) -> LLMOutput:
     """Generate an answer and validate its source citations."""
     from backend.app.rag.prompt_builder import build_prompt
-    from backend.app.rag.source_validator import validate_sources
+    from backend.app.rag.source_validator import (
+        SourceValidationError,
+        validate_sources,
+    )
 
     if not chunks:
         return LLMOutput(
@@ -129,4 +132,9 @@ async def answer_with_sources(
     prompt, source_map = build_prompt(question, chunks)
     output = await llm_client.generate(prompt)
 
-    return validate_sources(output, source_map)
+    try:
+        return validate_sources(output, source_map)
+    except SourceValidationError as exc:
+        raise LLMClientError(
+            "LLM yanıtındaki kaynak doğrulaması başarısız oldu."
+        ) from exc

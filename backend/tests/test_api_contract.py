@@ -135,3 +135,61 @@ def test_llm_client_error_returns_503() -> None:
     assert body["request_id"]
     assert "LLM" in body["message"]
     assert body["details"] is None
+
+
+def test_source_validation_error_returns_503() -> None:
+    from unittest.mock import AsyncMock
+
+    from backend.app.rag.llm_client import LLMOutput, answer_with_sources
+    from backend.app.schemas.retrieval import ChunkRecord
+
+    class InvalidCitationPipeline:
+        async def answer_question(
+            self,
+            question: str,
+            method: RetrievalMethod,
+        ) -> PipelineResult:
+            chunks = [
+                ChunkRecord(
+                    chunk_id="doc1-p4-c1",
+                    document_id="doc1",
+                    document_title="Sinav Yonetmeligi",
+                    source_url="https://example.edu.tr/sinav.pdf",
+                    page_number=4,
+                    text="Butunleme sinavi kosullari.",
+                )
+            ]
+
+            llm_client = AsyncMock()
+            llm_client.generate.return_value = LLMOutput(
+                answer="Bütünleme sınavına girebilirsiniz. [S99]",
+                used_source_ids=["S1"],
+                insufficient_context=False,
+            )
+
+            await answer_with_sources(question, chunks, llm_client)
+
+            raise AssertionError("Invalid citations must raise an LLMClientError.")
+
+    app.dependency_overrides[get_question_pipeline] = InvalidCitationPipeline
+
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            response = test_client.post(
+                "/api/questions/ask",
+                json={
+                    "question": "Bütünleme sınavına girebilir miyim?",
+                    "method": "hybrid_rerank",
+                },
+            )
+    finally:
+        app.dependency_overrides.pop(get_question_pipeline, None)
+
+    assert response.status_code == 503
+
+    body = response.json()
+
+    assert body["error"] == "service_unavailable"
+    assert body["request_id"]
+    assert "LLM" in body["message"]
+    assert body["details"] is None

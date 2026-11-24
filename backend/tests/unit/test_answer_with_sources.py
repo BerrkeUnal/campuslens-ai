@@ -1,9 +1,9 @@
-
 from unittest.mock import AsyncMock
 
 import pytest
 
 from backend.app.rag.llm_client import (
+    LLMClientError,
     LLMOutput,
     answer_with_sources,
 )
@@ -54,20 +54,39 @@ async def test_answer_with_valid_citation(mock_chunks):
 
 
 @pytest.mark.asyncio
-async def test_answer_rejects_fabricated_citation(mock_chunks):
+@pytest.mark.parametrize(
+    ("answer", "used_source_ids"),
+    [
+        ("Bütünleme sınavına girebilirsiniz. [S99]", ["S99"]),
+        ("Bütünleme sınavına girebilirsiniz. [S99]", ["S1"]),
+        ("Bütünleme sınavına girebilirsiniz. [S1]", []),
+    ],
+    ids=[
+        "unknown-source-id",
+        "unknown-citation",
+        "citation-source-mismatch",
+    ],
+)
+async def test_answer_rejects_invalid_sources(mock_chunks, answer, used_source_ids):
     client = AsyncMock()
     client.generate.return_value = LLMOutput(
-        answer="Bütünleme sınavına girebilirsiniz. [S9]",
-        used_source_ids=["S9"],
+        answer=answer,
+        used_source_ids=used_source_ids,
         insufficient_context=False,
     )
 
-    with pytest.raises(SourceValidationError):
+    with pytest.raises(
+        LLMClientError,
+        match="LLM yanıtındaki kaynak doğrulaması başarısız oldu",
+    ) as exc_info:
         await answer_with_sources(
             "Bütünlemeye girebilir miyim?",
             mock_chunks,
             client,
         )
+
+    assert isinstance(exc_info.value.__cause__, SourceValidationError)
+    client.generate.assert_awaited_once()
 
 
 @pytest.mark.asyncio
