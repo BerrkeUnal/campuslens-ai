@@ -80,3 +80,16 @@ def get_reranker() -> Reranker:
             _default_reranker = Reranker()
 
         return _default_reranker
+
+
+def rerank(
+    question: str,
+    candidates: list[RetrievedChunk],
+    top_k: int = 5,
+) -> list[RetrievedChunk]:
+    """Rerank candidates using the shared reranker instance."""
+    return get_reranker().rerank(
+        question,
+        candidates,
+        top_k,
+    )

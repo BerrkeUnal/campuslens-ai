@@ -25,6 +25,8 @@ class MetricsResponse(BaseModel):
     generation_latency_ms: int
     total_latency_ms: int
     estimated_cost_usd: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class PipelineResult(BaseModel):

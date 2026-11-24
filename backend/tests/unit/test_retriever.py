@@ -107,3 +107,57 @@ async def test_empty_retrieval_result(vector_store):
     )
 
     assert result == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "search_function"),
+    [
+        (RetrievalMethod.BM25, "search_bm25"),
+        (RetrievalMethod.DENSE, "search_dense"),
+        (RetrievalMethod.HYBRID, "search_hybrid_rrf"),
+        (RetrievalMethod.HYBRID_RERANK, "search_hybrid_rrf"),
+    ],
+)
+async def test_retrieval_never_exceeds_twenty_candidates(
+    vector_store,
+    monkeypatch,
+    method,
+    search_function,
+):
+    settings = get_settings()
+
+    monkeypatch.setattr(settings, "bm25_top_k", 50)
+    monkeypatch.setattr(settings, "dense_top_k", 50)
+
+    candidates = [
+        RetrievedChunk(
+            chunk_id=f"chunk-{i}",
+            document_id="doc-1",
+            document_title="Test document",
+            source_url="https://example.com/regulation",
+            page_number=1,
+            text=f"Test source {i}",
+            retrieval_method=method,
+            retrieval_score=1.0 / i,
+        )
+        for i in range(1, 51)
+    ]
+
+    selected_search = getattr(vector_store, search_function)
+    selected_search.return_value = candidates
+
+    retriever = Retriever(vector_store)
+
+    result = await retriever.retrieve(
+        "Test question",
+        method,
+    )
+
+    selected_search.assert_awaited_once_with(
+        "Test question",
+        20,
+    )
+
+    assert len(result) == 20
+    assert result == candidates[:20]

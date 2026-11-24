@@ -2,6 +2,15 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Standard API prices in USD per one million tokens.
+# Reference: https://openai.com/api/pricing/
+LLM_MODEL_PRICES_USD_PER_1M_TOKENS = {
+    "gpt-4.1-mini": {
+        "input": 0.40,
+        "output": 1.60,
+    },
+}
+
 
 class Settings(BaseSettings):
     app_env: str = "development"
@@ -20,7 +29,7 @@ class Settings(BaseSettings):
     llm_temperature: float = 0
 
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen3:8b"
+    ollama_model: str = "qwen3:4b"
 
     openai_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
