@@ -20,6 +20,28 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at TEXT NOT NULL,
     error_message TEXT
 );
+CREATE TABLE IF NOT EXISTS evaluation_runs (
+    run_id TEXT PRIMARY KEY NOT NULL,
+    method TEXT NOT NULL,
+    split TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+    total_cases INTEGER NOT NULL CHECK (total_cases >= 0),
+    recall_at_5 REAL CHECK (recall_at_5 BETWEEN 0 AND 1),
+    mrr_at_5 REAL CHECK (mrr_at_5 BETWEEN 0 AND 1),
+    average_latency_ms REAL CHECK (average_latency_ms >= 0),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    error_message TEXT,
+    is_mock INTEGER NOT NULL CHECK (is_mock IN (0, 1))
+);
+CREATE TABLE IF NOT EXISTS evaluation_case_results (
+    run_id TEXT NOT NULL REFERENCES evaluation_runs(run_id) ON DELETE CASCADE,
+    case_id TEXT NOT NULL,
+    source_rank INTEGER CHECK (source_rank BETWEEN 1 AND 5),
+    source_hit INTEGER NOT NULL CHECK (source_hit = (source_rank IS NOT NULL)),
+    latency_ms REAL NOT NULL CHECK (latency_ms >= 0),
+    PRIMARY KEY (run_id, case_id)
+);
 """
 
 
