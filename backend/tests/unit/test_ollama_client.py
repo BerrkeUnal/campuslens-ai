@@ -65,7 +65,28 @@ async def test_ollama_generates_structured_output() -> None:
     assert payload["stream"] is False
     assert payload["think"] is False
     assert "format" in payload
-    assert payload["messages"][1]["content"] == "Test kullanıcı promptu"
+    messages = payload["messages"]
+
+    assert [message["role"] for message in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert messages[-1]["content"].startswith("/no_think\n")
+    assert messages[-1]["content"].endswith("Test kullanıcı promptu")
+
+    few_shot_outputs = [
+        json.loads(message["content"])
+        for message in messages
+        if message["role"] == "assistant"
+    ]
+
+    assert len(few_shot_outputs) == 2
+    assert few_shot_outputs[0]["insufficient_context"] is False
+    assert few_shot_outputs[1]["insufficient_context"] is True
 
 
 @pytest.mark.asyncio
@@ -95,6 +116,15 @@ async def test_ollama_retries_invalid_json_once() -> None:
 
     assert output.answer == "Geçerli yanıt. [S1]"
     assert mock_request.await_count == 2
+
+    first_payload = mock_request.await_args_list[0].args[0]
+    second_payload = mock_request.await_args_list[1].args[0]
+
+    assert first_payload["messages"][-1] != second_payload["messages"][-1]
+    assert (
+        "Önceki denemede geçerli JSON üretilemedi"
+        in second_payload["messages"][-1]["content"]
+    )
 
 
 @pytest.mark.asyncio
@@ -165,3 +195,26 @@ async def test_ollama_rejects_invalid_output_twice() -> None:
         match="iki denemede de geçerli JSON",
     ):
         await client.generate("Test promptu")
+
+
+@pytest.mark.asyncio
+async def test_ollama_accepts_insufficient_context_output() -> None:
+    with patch(
+        "backend.app.rag.ollama_client.get_settings",
+        return_value=make_settings(),
+    ):
+        client = OllamaLLMClient()
+
+    response_content = json.dumps(
+        {
+            "answer": "Verilen kaynaklarda bu bilgi bulunmuyor.",
+            "used_source_ids": [],
+            "insufficient_context": True,
+        }
+    )
+    client._request = AsyncMock(return_value=make_response(200, response_content))
+
+    output = await client.generate("Yurt ücreti ne kadar?")
+
+    assert output.insufficient_context is True
+    assert output.used_source_ids == []
