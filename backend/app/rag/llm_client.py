@@ -1,4 +1,5 @@
 import json
+from typing import Protocol
 
 from openai import (
     APIConnectionError,
@@ -23,6 +24,10 @@ class LLMOutput(BaseModel):
     answer: str
     used_source_ids: list[str]
     insufficient_context: bool
+
+
+class LLMGenerator(Protocol):
+    async def generate(self, user_prompt: str) -> LLMOutput: ...
 
 
 class LLMClientError(ServiceUnavailableError):
@@ -113,7 +118,7 @@ class LLMClient:
 async def answer_with_sources(
     question: str,
     chunks: list["ChunkRecord"],
-    llm_client: LLMClient | None,
+    llm_client: LLMGenerator | None,
 ) -> LLMOutput:
     """Generate an answer and validate its source citations."""
     from backend.app.rag.prompt_builder import build_prompt

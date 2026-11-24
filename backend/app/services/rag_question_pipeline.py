@@ -1,7 +1,8 @@
 from time import perf_counter
 
 from backend.app.rag.hybrid_rerank import HybridRerankSearch
-from backend.app.rag.llm_client import LLMClient, answer_with_sources
+from backend.app.rag.llm_client import LLMGenerator, answer_with_sources
+from backend.app.rag.llm_provider import create_llm_client
 from backend.app.rag.retriever import Retriever
 from backend.app.schemas.questions import MetricsResponse, PipelineResult
 from backend.app.schemas.retrieval import (
@@ -18,7 +19,7 @@ class RAGQuestionPipeline:
         self,
         retriever: Retriever,
         hybrid_rerank_search: HybridRerankSearch,
-        llm_client: LLMClient | None = None,
+        llm_client: LLMGenerator | None = None,
     ) -> None:
         self._retriever = retriever
         self._hybrid_rerank_search = hybrid_rerank_search
@@ -77,9 +78,9 @@ class RAGQuestionPipeline:
 
         return await self._retriever.retrieve(question, method)
 
-    def _get_llm_client(self) -> LLMClient:
+    def _get_llm_client(self) -> LLMGenerator:
         if self._llm_client is None:
-            self._llm_client = LLMClient()
+            self._llm_client = create_llm_client()
 
         return self._llm_client
 
