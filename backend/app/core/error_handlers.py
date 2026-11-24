@@ -18,6 +18,28 @@ def get_request_id(request: Request) -> str:
     )
 
 
+def add_unexpected_error_headers(
+    request: Request,
+    response: JSONResponse,
+) -> JSONResponse:
+    request_id = get_request_id(request)
+    response.headers["X-Request-ID"] = request_id
+
+    origin = request.headers.get("origin")
+    allowed_origins = getattr(
+        request.app.state,
+        "cors_allowed_origins",
+        (),
+    )
+
+    if origin and origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+
+    return response
+
+
 async def application_error_handler(
     request: Request,
     exception: ApplicationError,
@@ -93,7 +115,7 @@ async def unexpected_error_handler(
         ),
     )
 
-    return JSONResponse(
+    response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "internal_server_error",
@@ -102,6 +124,8 @@ async def unexpected_error_handler(
             "details": None,
         },
     )
+
+    return add_unexpected_error_headers(request, response)
 
 
 def register_error_handlers(app: FastAPI) -> None:

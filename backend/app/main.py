@@ -33,24 +33,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.database = database
 
-    if settings.app_env == "development":
+    cors_allowed_origins = (
+        (settings.frontend_origin,) if settings.app_env == "development" else ()
+    )
+    app.state.cors_allowed_origins = cors_allowed_origins
+
+    if cors_allowed_origins:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=[settings.frontend_origin],
+            allow_origins=list(cors_allowed_origins),
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
         )
 
-    app.add_middleware(RequestIDMiddleware)
-    register_error_handlers(app)
+        app.add_middleware(RequestIDMiddleware)
+        register_error_handlers(app)
 
-    app.include_router(health.router, prefix="/api")
-    app.include_router(documents.router, prefix="/api")
-    app.include_router(questions.router, prefix="/api")
-    app.include_router(evaluations.router, prefix="/api")
+        app.include_router(health.router, prefix="/api")
+        app.include_router(documents.router, prefix="/api")
+        app.include_router(questions.router, prefix="/api")
+        app.include_router(evaluations.router, prefix="/api")
 
-    return app
+        return app
 
 
 app = create_app()
