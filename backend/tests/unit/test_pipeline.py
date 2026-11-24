@@ -587,7 +587,15 @@ async def test_pipeline_insufficient_context_with_candidates(
 
     assert candidates
     assert result.insufficient_context is True
-    assert result.sources == []
+    assert len(result.sources) == 5
+    assert [source.source_id for source in result.sources] == [
+        "S1",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+    ]
+    assert result.sources[0].chunk_id == candidates[0].chunk_id
     assert result.answer == ("Bu soruyu yanitlamak icin yeterli kaynak bulunamadi.")
     assert result.metrics.input_tokens == 1200
     assert result.metrics.output_tokens == 30

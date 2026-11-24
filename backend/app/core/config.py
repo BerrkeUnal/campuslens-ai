@@ -25,9 +25,14 @@ class Settings(BaseSettings):
     sparse_model: str = "Qdrant/bm25"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
+    llm_provider: str = "ollama"
+    llm_temperature: float = 0
+
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen3:4b"
+
     openai_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
-    llm_temperature: float = 0
 
     chunk_size_tokens: int = 400
     chunk_overlap_tokens: int = 60

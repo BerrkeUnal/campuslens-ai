@@ -3,7 +3,8 @@ from time import perf_counter
 
 from backend.app.rag.cost_estimator import estimate_cost
 from backend.app.rag.hybrid_rerank import HybridRerankSearch
-from backend.app.rag.llm_client import LLMClient, LLMClientError
+from backend.app.rag.llm_client import LLMClientError, LLMGenerator
+from backend.app.rag.llm_provider import create_llm_client
 from backend.app.rag.prompt_builder import build_prompt
 from backend.app.rag.qdrant_store import get_vector_store
 from backend.app.rag.reranker import get_reranker
@@ -30,7 +31,7 @@ class RAGPipeline:
         self,
         retriever: Retriever,
         hybrid_search: HybridRerankSearch,
-        llm_factory: Callable[[], LLMClient] = LLMClient,
+        llm_factory: Callable[[], LLMGenerator] = create_llm_client,
     ) -> None:
         self._retriever = retriever
         self._hybrid_search = hybrid_search
@@ -109,8 +110,12 @@ class RAGPipeline:
             ) from exc
 
         sources = []
+        source_ids = output.used_source_ids
 
-        for source_id in output.used_source_ids:
+        if output.insufficient_context and not source_ids:
+            source_ids = list(source_map)
+
+        for source_id in source_ids:
             chunk = source_map[source_id]
 
             sources.append(
@@ -129,11 +134,14 @@ class RAGPipeline:
 
         usage = generation.usage
 
-        estimated_cost = estimate_cost(
-            model=llm_client.model,
-            input_tokens=(usage.input_tokens if usage is not None else None),
-            output_tokens=(usage.output_tokens if usage is not None else None),
-        )
+        if getattr(llm_client, "provider", "openai") == "ollama":
+            estimated_cost = 0.0
+        else:
+            estimated_cost = estimate_cost(
+                model=llm_client.model,
+                input_tokens=(usage.input_tokens if usage is not None else None),
+                output_tokens=(usage.output_tokens if usage is not None else None),
+            )
 
         return PipelineResult(
             answer=output.answer,

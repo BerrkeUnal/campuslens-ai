@@ -1,55 +1,15 @@
+from functools import lru_cache
 from uuid import uuid4
 
 from backend.app.ports.question_pipeline import QuestionPipeline
-from backend.app.schemas.questions import (
-    AskRequest,
-    AskResponse,
-    MetricsResponse,
-    PipelineResult,
-)
-from backend.app.schemas.retrieval import (
-    RetrievalMethod,
-    SourceResponse,
-)
+from backend.app.rag.pipeline import get_rag_pipeline
+from backend.app.schemas.questions import AskRequest, AskResponse
 
 
-class MockQuestionPipeline:
-    async def answer_question(
-        self,
-        question: str,
-        method: RetrievalMethod,
-    ) -> PipelineResult:
-        rerank_score = 1.0 if method == RetrievalMethod.HYBRID_RERANK else None
-
-        source = SourceResponse(
-            source_id="S1",
-            chunk_id="mock-document-p4-c1",
-            document_id="mock-document",
-            document_title="Önlisans ve Lisans Yönetmeliği",
-            source_url="https://www.example.edu.tr/regulations",
-            page_number=4,
-            excerpt=("Bu yanıt geliştirme amaçlı mock kaynaktan oluşturulmuştur."),
-            retrieval_score=1.0,
-            rerank_score=rerank_score,
-        )
-
-        return PipelineResult(
-            answer=(
-                f'"{question}" sorusu için oluşturulmuş geçici backend yanıtıdır. [S1]'
-            ),
-            insufficient_context=False,
-            sources=[source],
-            metrics=MetricsResponse(
-                retrieval_latency_ms=0,
-                generation_latency_ms=0,
-                total_latency_ms=0,
-                estimated_cost_usd=0,
-            ),
-        )
-
-
+@lru_cache
 def get_question_pipeline() -> QuestionPipeline:
-    return MockQuestionPipeline()
+    """Build and reuse the configured RAG pipeline."""
+    return get_rag_pipeline()
 
 
 async def ask_question(

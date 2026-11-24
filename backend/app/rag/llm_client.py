@@ -1,4 +1,5 @@
 import json
+from typing import Protocol
 
 from openai import (
     APIConnectionError,
@@ -39,6 +40,20 @@ class LLMGenerationResult(BaseModel):
     usage: LLMUsage | None = None
 
 
+class LLMGenerator(Protocol):
+    provider: str
+    model: str
+
+    async def generate(self, user_prompt: str) -> LLMOutput: ...
+
+    async def generate_with_usage(
+        self,
+        user_prompt: str,
+    ) -> LLMGenerationResult: ...
+
+    async def aclose(self) -> None: ...
+
+
 class LLMClientError(ServiceUnavailableError):
     """Raised when LLM generation fails (HTTP 503)."""
 
@@ -51,6 +66,8 @@ class LLMClientError(ServiceUnavailableError):
 
 
 class LLMClient:
+    provider = "openai"
+
     def __init__(self):
         settings = get_settings()
 
@@ -164,7 +181,7 @@ class LLMClient:
 async def answer_with_sources(
     question: str,
     chunks: list["ChunkRecord"],
-    llm_client: LLMClient,
+    llm_client: LLMGenerator | None,
 ) -> LLMOutput:
     """Generate an answer and validate its source citations."""
     from backend.app.rag.prompt_builder import build_prompt
@@ -179,6 +196,9 @@ async def answer_with_sources(
             used_source_ids=[],
             insufficient_context=True,
         )
+
+    if llm_client is None:
+        raise LLMClientError("LLM istemcisi yapılandırılmamış.")
 
     prompt, source_map = build_prompt(question, chunks)
     output = await llm_client.generate(prompt)
