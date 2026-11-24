@@ -47,15 +47,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
 
-        app.add_middleware(RequestIDMiddleware)
-        register_error_handlers(app)
+    app.add_middleware(RequestIDMiddleware)
+    register_error_handlers(app)
 
-        app.include_router(health.router, prefix="/api")
-        app.include_router(documents.router, prefix="/api")
-        app.include_router(questions.router, prefix="/api")
-        app.include_router(evaluations.router, prefix="/api")
+    app.include_router(health.router, prefix="/api")
+    app.include_router(documents.router, prefix="/api")
+    app.include_router(questions.router, prefix="/api")
+    app.include_router(evaluations.router, prefix="/api")
 
-        return app
+    return app
 
 
 app = create_app()
