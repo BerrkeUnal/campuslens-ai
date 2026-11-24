@@ -2,6 +2,8 @@ from backend.app.core.config import get_settings
 from backend.app.ports.vector_store import VectorStore
 from backend.app.schemas.retrieval import RetrievalMethod, RetrievedChunk
 
+MAX_RETRIEVAL_CANDIDATES = 20
+
 
 class Retriever:
     """Route retrieval requests to the configured vector store."""
@@ -15,29 +17,44 @@ class Retriever:
         question: str,
         method: RetrievalMethod,
     ) -> list[RetrievedChunk]:
-        """Retrieve candidates using the selected search method."""
+        """Retrieve at most twenty candidates using the selected method."""
         if not question.strip():
             raise ValueError("Question must not be empty.")
 
         if method == RetrievalMethod.BM25:
-            return await self._vector_store.search_bm25(
-                question,
+            limit = min(
                 self._settings.bm25_top_k,
+                MAX_RETRIEVAL_CANDIDATES,
             )
-
-        if method == RetrievalMethod.DENSE:
-            return await self._vector_store.search_dense(
+            candidates = await self._vector_store.search_bm25(
                 question,
-                self._settings.dense_top_k,
+                limit,
             )
 
-        if method in (
+        elif method == RetrievalMethod.DENSE:
+            limit = min(
+                self._settings.dense_top_k,
+                MAX_RETRIEVAL_CANDIDATES,
+            )
+            candidates = await self._vector_store.search_dense(
+                question,
+                limit,
+            )
+
+        elif method in (
             RetrievalMethod.HYBRID,
             RetrievalMethod.HYBRID_RERANK,
         ):
-            return await self._vector_store.search_hybrid_rrf(
-                question,
+            limit = min(
                 self._settings.dense_top_k,
+                MAX_RETRIEVAL_CANDIDATES,
+            )
+            candidates = await self._vector_store.search_hybrid_rrf(
+                question,
+                limit,
             )
 
-        raise ValueError(f"Unsupported retrieval method: {method}")
+        else:
+            raise ValueError(f"Unsupported retrieval method: {method}")
+
+        return candidates[:limit]

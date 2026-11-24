@@ -553,3 +553,96 @@ async def test_pipeline_closes_llm_client(
             )
 
     llm_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_insufficient_context_with_candidates(
+    candidates,
+    dependencies,
+):
+    retriever, hybrid_search, llm_client, llm_factory = dependencies
+
+    llm_client.generate_with_usage.return_value = LLMGenerationResult(
+        output=LLMOutput(
+            answer="Bu soruyu yanitlamak icin yeterli kaynak bulunamadi.",
+            used_source_ids=[],
+            insufficient_context=True,
+        ),
+        usage=LLMUsage(
+            input_tokens=1200,
+            output_tokens=30,
+        ),
+    )
+
+    pipeline = RAGPipeline(
+        retriever=retriever,
+        hybrid_search=hybrid_search,
+        llm_factory=llm_factory,
+    )
+
+    result = await pipeline.answer_question(
+        question="Universitenin burs kosullari nelerdir?",
+        method=RetrievalMethod.DENSE,
+    )
+
+    assert candidates
+    assert result.insufficient_context is True
+    assert result.sources == []
+    assert result.answer == ("Bu soruyu yanitlamak icin yeterli kaynak bulunamadi.")
+    assert result.metrics.input_tokens == 1200
+    assert result.metrics.output_tokens == 30
+    assert result.metrics.estimated_cost_usd == pytest.approx(0.000528)
+
+    retriever.retrieve.assert_awaited_once()
+    hybrid_search.search.assert_not_awaited()
+    llm_factory.assert_called_once()
+    llm_client.generate_with_usage.assert_awaited_once()
+    llm_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_is_stable_with_identical_inputs(
+    dependencies,
+):
+    retriever, hybrid_search, llm_client, llm_factory = dependencies
+
+    pipeline = RAGPipeline(
+        retriever=retriever,
+        hybrid_search=hybrid_search,
+        llm_factory=llm_factory,
+    )
+
+    results = []
+
+    for _ in range(3):
+        result = await pipeline.answer_question(
+            question="Butunleme sinavina kimler girebilir?",
+            method=RetrievalMethod.HYBRID_RERANK,
+        )
+        results.append(result)
+
+    first = results[0]
+
+    for result in results[1:]:
+        assert result.answer == first.answer
+        assert result.insufficient_context == first.insufficient_context
+        assert result.sources == first.sources
+
+        assert result.metrics.input_tokens == first.metrics.input_tokens
+        assert result.metrics.output_tokens == first.metrics.output_tokens
+
+        assert result.metrics.estimated_cost_usd == (first.metrics.estimated_cost_usd)
+
+    assert first.sources
+    assert first.insufficient_context is False
+
+    assert hybrid_search.search.await_count == 3
+    assert llm_client.generate_with_usage.await_count == 3
+    assert llm_client.aclose.await_count == 3
+    assert llm_factory.call_count == 3
+
+    retriever.retrieve.assert_not_awaited()
+
+    prompts = [call.args[0] for call in llm_client.generate_with_usage.await_args_list]
+
+    assert prompts[0] == prompts[1] == prompts[2]

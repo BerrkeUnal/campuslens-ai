@@ -155,3 +155,30 @@ def test_non_finite_scores_are_rejected(invalid_score, candidates, cross_encoder
 
     with pytest.raises(ValueError, match="non-finite score"):
         Reranker().rerank("Test question", candidates)
+
+
+@pytest.mark.parametrize("top_k", [None, 2])
+def test_public_rerank_uses_shared_instance(candidates, top_k):
+    from backend.app.rag.reranker import rerank
+
+    expected_top_k = 5 if top_k is None else top_k
+    expected_result = candidates[:expected_top_k]
+
+    with patch("backend.app.rag.reranker.get_reranker") as get_shared_reranker:
+        shared_reranker = get_shared_reranker.return_value
+        shared_reranker.rerank.return_value = expected_result
+
+        if top_k is None:
+            result = rerank("Test question", candidates)
+        else:
+            result = rerank("Test question", candidates, top_k)
+
+        get_shared_reranker.assert_called_once_with()
+
+        shared_reranker.rerank.assert_called_once_with(
+            "Test question",
+            candidates,
+            expected_top_k,
+        )
+
+        assert result == expected_result
