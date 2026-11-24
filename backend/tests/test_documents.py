@@ -1,13 +1,23 @@
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
-
-client = TestClient(app)
+from backend.app.core.config import Settings
+from backend.app.main import create_app
 
 PDF_CONTENT = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF"
 
 
-def upload_test_document():
+@pytest.fixture
+def client(tmp_path: Path) -> Iterator[TestClient]:
+    settings = Settings(database_url=f"sqlite:///{(tmp_path / 'documents.db').as_posix()}")
+    with TestClient(create_app(settings)) as test_client:
+        yield test_client
+
+
+def upload_test_document(client: TestClient):
     return client.post(
         "/api/documents/upload",
         files={
@@ -24,8 +34,8 @@ def upload_test_document():
     )
 
 
-def test_upload_document() -> None:
-    response = upload_test_document()
+def test_upload_document(client: TestClient) -> None:
+    response = upload_test_document(client)
 
     assert response.status_code == 201
 
@@ -37,8 +47,8 @@ def test_upload_document() -> None:
     assert body["chunk_count"] == 0
 
 
-def test_list_documents() -> None:
-    upload_test_document()
+def test_list_documents(client: TestClient) -> None:
+    upload_test_document(client)
 
     response = client.get("/api/documents")
 
@@ -46,7 +56,7 @@ def test_list_documents() -> None:
     assert response.json()["total"] >= 1
 
 
-def test_rejects_non_pdf_file() -> None:
+def test_rejects_non_pdf_file(client: TestClient) -> None:
     response = client.post(
         "/api/documents/upload",
         files={
@@ -65,8 +75,8 @@ def test_rejects_non_pdf_file() -> None:
     assert response.status_code == 415
 
 
-def test_delete_document() -> None:
-    upload_response = upload_test_document()
+def test_delete_document(client: TestClient) -> None:
+    upload_response = upload_test_document(client)
     document_id = upload_response.json()["document_id"]
 
     delete_response = client.delete(
@@ -76,7 +86,7 @@ def test_delete_document() -> None:
     assert delete_response.status_code == 204
 
 
-def test_delete_unknown_document() -> None:
+def test_delete_unknown_document(client: TestClient) -> None:
     response = client.delete(
         "/api/documents/00000000-0000-0000-0000-000000000000",
     )
