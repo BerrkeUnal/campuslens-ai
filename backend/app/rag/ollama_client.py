@@ -12,6 +12,98 @@ from backend.app.rag.llm_client import (
 )
 from backend.app.rag.prompt_builder import SYSTEM_PROMPT
 
+_GROUNDED_EXAMPLE_USER = """/no_think
+Kaynaklar:
+[S1]
+Belge: Örnek Yönetmelik
+Sayfa: 3
+Bölüm: Bütünleme sınavı
+Metin: Yarıyıl sonu sınavından FF alan öğrenciler bütünleme sınavına girebilir.
+
+Öğrenci sorusu:
+FF aldım, bütünleme sınavına girebilir miyim?
+"""
+
+_GROUNDED_EXAMPLE_ASSISTANT = json.dumps(
+    {
+        "answer": "Evet, bütünleme sınavına girebilirsiniz. [S1]",
+        "used_source_ids": ["S1"],
+        "insufficient_context": False,
+    },
+    ensure_ascii=False,
+)
+
+_INSUFFICIENT_EXAMPLE_USER = """/no_think
+Kaynaklar:
+[S1]
+Belge: Akademik Takvim
+Sayfa: 1
+Bölüm: Güz dönemi
+Metin: Güz dönemi dersleri 21 Eylül tarihinde başlar.
+
+Öğrenci sorusu:
+Öğrenci yurdunun aylık ücreti kaç TL?
+"""
+
+_INSUFFICIENT_EXAMPLE_ASSISTANT = json.dumps(
+    {
+        "answer": "Verilen kaynaklarda yurt ücreti hakkında yeterli bilgi bulunmuyor.",
+        "used_source_ids": [],
+        "insufficient_context": True,
+    },
+    ensure_ascii=False,
+)
+
+
+def _build_messages(
+    user_prompt: str,
+    *,
+    retry: bool,
+) -> list[dict[str, str]]:
+    system_prompt = (
+        f"{SYSTEM_PROMPT}\n"
+        "Düşünme sürecini, Markdown kod bloğunu veya JSON dışında "
+        "herhangi bir metni yanıta ekleme."
+    )
+
+    if retry:
+        actual_prompt = (
+            "/no_think\n"
+            "Önceki denemede geçerli JSON üretilemedi. "
+            "Düşünme metni, Markdown veya açıklama ekleme; "
+            "yalnızca şemaya uyan JSON nesnesi döndür.\n\n"
+            f"{user_prompt}"
+        )
+    else:
+        actual_prompt = f"/no_think\n{user_prompt}"
+
+    return [
+        {
+            "role": "system",
+            "content": system_prompt,
+        },
+        {
+            "role": "user",
+            "content": _GROUNDED_EXAMPLE_USER,
+        },
+        {
+            "role": "assistant",
+            "content": _GROUNDED_EXAMPLE_ASSISTANT,
+        },
+        {
+            "role": "user",
+            "content": _INSUFFICIENT_EXAMPLE_USER,
+        },
+        {
+            "role": "assistant",
+            "content": _INSUFFICIENT_EXAMPLE_ASSISTANT,
+        },
+        {
+            "role": "user",
+            "content": actual_prompt,
+        },
+    ]
+
 
 class OllamaLLMClient:
     """Generate structured answers with a locally running Ollama model."""
@@ -45,18 +137,8 @@ class OllamaLLMClient:
         user_prompt: str,
     ) -> LLMGenerationResult:
         """Generate structured JSON and collect local token usage."""
-        payload = {
+        base_payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
             "stream": False,
             "think": False,
             "format": LLMOutput.model_json_schema(),
@@ -71,6 +153,13 @@ class OllamaLLMClient:
         usage_available = True
 
         for attempt in range(2):
+            payload = {
+                **base_payload,
+                "messages": _build_messages(
+                    user_prompt,
+                    retry=attempt == 1,
+                ),
+            }
             try:
                 response = await self._request(payload)
                 response.raise_for_status()
