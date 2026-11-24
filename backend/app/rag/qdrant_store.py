@@ -435,25 +435,33 @@ class QdrantStore:
             # Another process may be creating it at the same moment; the
             # server then answers 409 ("already exists") or even 500 while
             # the collection is still being set up.
-            if not self._wait_until_collection_exists():
+            payload_schema = self._wait_for_concurrent_collection(dimension)
+
+            if payload_schema is None:
                 raise
 
             logger.info("Collection %s was created concurrently", self.collection_name)
-            return self._validate_schema(dimension).payload_schema
+            return payload_schema
 
         return {}
 
-    def _wait_until_collection_exists(self) -> bool:
+    def _wait_for_concurrent_collection(self, dimension: int) -> dict[str, Any] | None:
+        """Wait until a collection created by someone else is readable.
+
+        Right after creation the server may already report the collection as
+        existing while ``get_collection`` still fails with HTTP 500, so the
+        schema read is retried as well. A real schema mismatch is raised.
+        """
         for _ in range(CONCURRENT_CREATE_POLLS):
             try:
                 if self._client.collection_exists(self.collection_name):
-                    return True
+                    return self._validate_schema(dimension).payload_schema or {}
             except (UnexpectedResponse, ResponseHandlingException):
-                pass
+                pass  # still being set up
 
             time.sleep(CONCURRENT_CREATE_POLL_SECONDS)
 
-        return False
+        return None
 
     def _ensure_payload_index(self, payload_schema: dict[str, Any] | None) -> None:
         if _is_local_client(self._client) or "document_id" in (payload_schema or {}):

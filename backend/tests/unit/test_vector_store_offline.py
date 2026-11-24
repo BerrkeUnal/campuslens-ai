@@ -373,6 +373,34 @@ def test_create_tolerates_collection_created_by_another_process(
     assert memory_store.health_status() == "ok"
 
 
+def test_create_waits_while_concurrent_collection_is_still_initializing(
+    memory_store: QdrantStore,
+    monkeypatch,
+) -> None:
+    real_create = memory_store.client.create_collection
+    real_get = memory_store.client.get_collection
+    failures = {"left": 2}
+
+    def racing_create(**kwargs):
+        real_create(**kwargs)
+        raise _unexpected(500)
+
+    def initializing_get(*args, **kwargs):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise _unexpected(500, b'{"status":{"error":"0 of 0 read operations"}}')
+        return real_get(*args, **kwargs)
+
+    monkeypatch.setattr(memory_store.client, "create_collection", racing_create)
+    monkeypatch.setattr(memory_store.client, "get_collection", initializing_get)
+    monkeypatch.setattr(qdrant_store_module, "CONCURRENT_CREATE_POLL_SECONDS", 0)
+
+    memory_store.create_collection()
+
+    assert failures["left"] == 0
+    assert memory_store.health_status() == "ok"
+
+
 def test_failed_create_without_concurrent_creator_raises(
     memory_store: QdrantStore,
     monkeypatch,
