@@ -1,4 +1,3 @@
-
 import re
 
 from backend.app.rag.llm_client import LLMOutput
@@ -19,32 +18,31 @@ def validate_sources(
     used_ids = output.used_source_ids
 
     if len(used_ids) != len(set(used_ids)):
-        raise SourceValidationError(
-            "Duplicate source IDs are not allowed."
-        )
+        raise SourceValidationError("Duplicate source IDs are not allowed.")
 
     if not set(used_ids).issubset(allowed_ids):
-        raise SourceValidationError(
-            "LLM referenced an unknown source ID."
-        )
+        raise SourceValidationError("LLM referenced an unknown source ID.")
 
-    cited_ids = set(
-        re.findall(r"\[([^\[\]]+)\]", output.answer)
-    )
+    cited_ids: set[str] = set()
+
+    for bracket in re.findall(r"\[([^\[\]]+)\]", output.answer):
+        parts = [part.strip() for part in bracket.split(",")]
+
+        if not any(re.fullmatch(r"S[0-9]+", part) for part in parts):
+            continue
+
+        if not all(re.fullmatch(r"S[0-9]+", part) for part in parts):
+            raise SourceValidationError("Answer contains a malformed citation.")
+
+        cited_ids.update(parts)
 
     if not cited_ids.issubset(allowed_ids):
-        raise SourceValidationError(
-            "Answer contains an unknown citation."
-        )
+        raise SourceValidationError("Answer contains an unknown citation.")
 
     if cited_ids != set(used_ids):
-        raise SourceValidationError(
-            "Answer citations do not match used_source_ids."
-        )
+        raise SourceValidationError("Answer citations do not match used_source_ids.")
 
     if not output.insufficient_context and not used_ids:
-        raise SourceValidationError(
-            "A grounded answer must cite at least one source."
-        )
+        raise SourceValidationError("A grounded answer must cite at least one source.")
 
     return output
