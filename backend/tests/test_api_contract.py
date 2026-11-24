@@ -100,3 +100,38 @@ def test_service_error_returns_503() -> None:
     assert body["error"] == "service_unavailable"
     assert body["request_id"]
     assert "LLM" in body["message"]
+
+
+def test_llm_client_error_returns_503() -> None:
+    from backend.app.rag.llm_client import LLMClientError
+
+    class FailingLLMPipeline:
+        async def answer_question(
+            self,
+            question: str,
+            method: RetrievalMethod,
+        ) -> PipelineResult:
+            raise LLMClientError("LLM servisine bağlanılamadı.")
+
+    app.dependency_overrides[get_question_pipeline] = FailingLLMPipeline
+
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            response = test_client.post(
+                "/api/questions/ask",
+                json={
+                    "question": "Bütünleme sınavı ne zaman?",
+                    "method": "hybrid_rerank",
+                },
+            )
+    finally:
+        app.dependency_overrides.pop(get_question_pipeline, None)
+
+    assert response.status_code == 503
+
+    body = response.json()
+
+    assert body["error"] == "service_unavailable"
+    assert body["request_id"]
+    assert "LLM" in body["message"]
+    assert body["details"] is None

@@ -1,4 +1,3 @@
-
 import json
 
 from openai import (
@@ -13,6 +12,7 @@ from openai import (
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from backend.app.core.config import get_settings
+from backend.app.core.exceptions import ServiceUnavailableError
 from backend.app.rag.prompt_builder import SYSTEM_PROMPT
 from backend.app.schemas.retrieval import ChunkRecord
 
@@ -25,8 +25,15 @@ class LLMOutput(BaseModel):
     insufficient_context: bool
 
 
-class LLMClientError(Exception):
-    """Raised when LLM generation fails."""
+class LLMClientError(ServiceUnavailableError):
+    """Raised when LLM generation fails (HTTP 503)."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("LLM")
+        self.detail = detail
+
+    def __str__(self) -> str:
+        return self.detail
 
 
 class LLMClient:
@@ -39,9 +46,7 @@ class LLMClient:
         api_key = settings.openai_api_key
 
         if not api_key or not api_key.strip():
-            raise LLMClientError(
-                "LLM servisi için API anahtarı yapılandırılmamış."
-            )
+            raise LLMClientError("LLM servisi için API anahtarı yapılandırılmamış.")
 
         self.client = AsyncOpenAI(
             api_key=api_key,
@@ -76,27 +81,21 @@ class LLMClient:
                 ) from exc
 
             except RateLimitError as exc:
-                raise LLMClientError(
-                    "LLM servisinin istek limiti aşıldı."
-                ) from exc
+                raise LLMClientError("LLM servisinin istek limiti aşıldı.") from exc
             except AuthenticationError as exc:
                 raise LLMClientError(
                     "LLM servisi için kimlik doğrulama başarısız oldu."
                 ) from exc
 
             except BadRequestError as exc:
-                raise LLMClientError(
-                    "LLM isteği işlenemedi."
-                ) from exc
+                raise LLMClientError("LLM isteği işlenemedi.") from exc
 
             except OpenAIError as exc:
                 raise LLMClientError(
                     "LLM servisinde beklenmeyen bir hata oluştu."
                 ) from exc
             if response.status != "completed":
-                raise LLMClientError(
-                    "LLM yanıtı tamamlanamadı."
-                )
+                raise LLMClientError("LLM yanıtı tamamlanamadı.")
 
             try:
                 data = json.loads(response.output_text)
