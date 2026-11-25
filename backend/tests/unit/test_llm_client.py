@@ -414,3 +414,108 @@ async def test_llm_client_closes_underlying_connection():
     await client.aclose()
 
     mock_close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank_answer", ["", "   ", "\t\n"])
+async def test_llm_retries_blank_answer_and_accumulates_usage(
+    blank_answer: str,
+) -> None:
+    import json
+
+    client = LLMClient.__new__(LLMClient)
+    client.model = "gpt-4.1-mini"
+    client.temperature = 0
+
+    invalid_response = SimpleNamespace(
+        status="completed",
+        output_text=json.dumps(
+            {
+                "answer": blank_answer,
+                "used_source_ids": [],
+                "insufficient_context": True,
+            }
+        ),
+        usage=SimpleNamespace(
+            input_tokens=1000,
+            output_tokens=23,
+        ),
+    )
+
+    valid_response = SimpleNamespace(
+        status="completed",
+        output_text=json.dumps(
+            {
+                "answer": (
+                    "Bu soruyu yanıtlamak için "
+                    "yeterli kaynak bulunamadı."
+                ),
+                "used_source_ids": [],
+                "insufficient_context": True,
+            }
+        ),
+        usage=SimpleNamespace(
+            input_tokens=1100,
+            output_tokens=42,
+        ),
+    )
+
+    mock_create = AsyncMock(
+        side_effect=[invalid_response, valid_response]
+    )
+
+    client.client = SimpleNamespace(
+        responses=SimpleNamespace(create=mock_create)
+    )
+
+    result = await client.generate_with_usage("Mock question")
+
+    assert result.output.answer == (
+        "Bu soruyu yanıtlamak için yeterli kaynak bulunamadı."
+    )
+    assert result.output.insufficient_context is True
+    assert result.output.used_source_ids == []
+
+    assert result.usage is not None
+    assert result.usage.input_tokens == 2100
+    assert result.usage.output_tokens == 65
+
+    assert mock_create.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank_answer", ["", "   ", "\t\n"])
+async def test_llm_rejects_two_blank_answers(
+    blank_answer: str,
+) -> None:
+    import json
+
+    client = LLMClient.__new__(LLMClient)
+    client.model = "gpt-4.1-mini"
+    client.temperature = 0
+
+    invalid_response = SimpleNamespace(
+        status="completed",
+        output_text=json.dumps(
+            {
+                "answer": blank_answer,
+                "used_source_ids": [],
+                "insufficient_context": True,
+            }
+        ),
+    )
+
+    mock_create = AsyncMock(return_value=invalid_response)
+
+    client.client = SimpleNamespace(
+        responses=SimpleNamespace(create=mock_create)
+    )
+
+    with pytest.raises(
+        LLMClientError,
+        match="iki denemede de",
+    ) as exc_info:
+        await client.generate("Mock question")
+
+    assert exc_info.value.status_code == 503
+    assert mock_create.await_count == 2

@@ -278,6 +278,23 @@ class TextEmbedder:
         self._get_dense_model()
         self._get_sparse_model()
 
+    def warm_up(self) -> None:
+        """Load both models and run a small query inference."""
+        self.load()
+
+        question = "Öğrenci kayıt işlemleri"
+
+        dense_vector = self.encode_query(question)
+        sparse_vector = self.encode_sparse_query(question)
+
+        if not dense_vector:
+            raise _embedding_error("Dense embedding warm-up returned an empty vector.")
+
+        if not sparse_vector.indices:
+            raise _embedding_error("Sparse embedding warm-up returned an empty vector.")
+
+        logger.info("Embedding warm-up completed.")
+
     def encode_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Encode passages with the E5 ``passage:`` prefix."""
         if not texts:

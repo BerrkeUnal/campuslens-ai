@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.app.rag.reranker import Reranker
+from backend.app.rag.reranker import Reranker, RerankerModelError
 from backend.app.schemas.retrieval import RetrievalMethod, RetrievedChunk
 
 
@@ -186,3 +186,117 @@ def test_public_rerank_uses_shared_instance(candidates, top_k):
         )
 
         assert result == expected_result
+
+
+def test_warm_up_loads_model_and_runs_inference(cross_encoder):
+    model = cross_encoder.return_value
+    model.predict.return_value = [0.9]
+
+    reranker = Reranker("BAAI/bge-reranker-v2-m3")
+    reranker.warm_up()
+
+    cross_encoder.assert_called_once_with(
+        "BAAI/bge-reranker-v2-m3",
+        device="cpu",
+        local_files_only=True,
+    )
+
+    model.predict.assert_called_once_with(
+        [
+            (
+                "Öğrenci kayıt işlemleri",
+                "Öğrenci kayıtları akademik takvime göre yapılır.",
+            )
+        ],
+        show_progress_bar=False,
+    )
+
+
+def test_rerank_reuses_warmed_model(candidates, cross_encoder):
+    model = cross_encoder.return_value
+    model.predict.side_effect = [
+        [0.9],
+        [0.2, 0.9, 0.4, 0.8, 0.1, 0.7],
+    ]
+
+    reranker = Reranker()
+
+    reranker.warm_up()
+    result = reranker.rerank("Test question", candidates)
+
+    assert cross_encoder.call_count == 1
+    assert model.predict.call_count == 2
+    assert len(result) == 5
+    assert result[0].page_number == 2
+
+
+def test_model_loading_failure_returns_controlled_error(candidates, cross_encoder):
+    cross_encoder.side_effect = OSError("Model missing from cache")
+
+    with pytest.raises(RerankerModelError) as error:
+        Reranker().rerank("Test question", candidates)
+
+    assert error.value.status_code == 503
+    assert error.value.code == "reranker_unavailable"
+    assert "Model missing from cache" in error.value.detail
+    assert isinstance(error.value.__cause__, OSError)
+    assert "Model missing from cache" not in error.value.message
+
+
+def test_warm_up_loading_failure_returns_controlled_error(
+    cross_encoder,
+):
+    cross_encoder.side_effect = OSError("Model missing from cache")
+
+    with pytest.raises(RerankerModelError) as error:
+        Reranker().warm_up()
+
+    assert error.value.status_code == 503
+    assert error.value.code == "reranker_unavailable"
+    cross_encoder.return_value.predict.assert_not_called()
+
+
+def test_inference_failure_returns_controlled_error(candidates, cross_encoder):
+    cross_encoder.return_value.predict.side_effect = RuntimeError("Inference failed")
+
+    with pytest.raises(RerankerModelError) as error:
+        Reranker().rerank("Test question", candidates)
+
+    assert error.value.status_code == 503
+    assert error.value.code == "reranker_unavailable"
+    assert isinstance(error.value.__cause__, RuntimeError)
+
+
+def test_warm_up_inference_failure_returns_controlled_error(
+    cross_encoder,
+):
+    cross_encoder.return_value.predict.side_effect = RuntimeError(
+        "Warm-up inference failed"
+    )
+
+    with pytest.raises(RerankerModelError) as error:
+        Reranker().warm_up()
+
+    assert error.value.status_code == 503
+    assert error.value.code == "reranker_unavailable"
+    assert isinstance(error.value.__cause__, RuntimeError)
+
+
+@pytest.mark.parametrize(
+    "scores",
+    [
+        [],
+        [0.1, 0.2],
+        [float("nan")],
+        [float("inf")],
+    ],
+)
+def test_invalid_warm_up_scores_are_rejected(scores, cross_encoder):
+    cross_encoder.return_value.predict.return_value = scores
+
+    with pytest.raises(RerankerModelError) as error:
+        Reranker().warm_up()
+
+    assert error.value.status_code == 503
+    assert error.value.code == "reranker_unavailable"
+    assert "Invalid reranker warm-up score" in error.value.detail

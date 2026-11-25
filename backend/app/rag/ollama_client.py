@@ -1,7 +1,7 @@
 import json
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from backend.app.core.config import get_settings
 from backend.app.rag.llm_client import (
@@ -105,6 +105,10 @@ def _build_messages(
     ]
 
 
+class WarmupOutput(BaseModel):
+    status: str
+
+
 class OllamaLLMClient:
     """Generate structured answers with a locally running Ollama model."""
 
@@ -116,12 +120,111 @@ class OllamaLLMClient:
         self.base_url = settings.ollama_base_url.rstrip("/")
         self.model = settings.ollama_model
         self.temperature = settings.llm_temperature
+        self.keep_alive = settings.ollama_keep_alive
 
         if not self.base_url:
             raise LLMClientError("Ollama servis adresi yapılandırılmamış.")
 
         if not self.model.strip():
             raise LLMClientError("Ollama model adı yapılandırılmamış.")
+
+    async def check_model_available(self) -> None:
+        """Verify that the configured Ollama model is already installed."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/show",
+                    json={"model": self.model},
+                )
+                response.raise_for_status()
+
+        except httpx.TimeoutException as exc:
+            raise LLMClientError(
+                "Ollama model kontrolü zamanında tamamlanamadı."
+            ) from exc
+
+        except httpx.ConnectError as exc:
+            raise LLMClientError(
+                "Ollama servisine bağlanılamadı. "
+                "Ollama uygulamasının çalıştığını kontrol edin."
+            ) from exc
+
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise LLMClientError(
+                    f"Ollama modeli bulunamadı: {self.model}. "
+                    "Önce 'python -m scripts.prepare_models' "
+                    "komutunu çalıştırın."
+                ) from exc
+
+            raise LLMClientError("Ollama model kontrolü başarısız oldu.") from exc
+
+        except httpx.RequestError as exc:
+            raise LLMClientError("Ollama servisiyle iletişim kurulamadı.") from exc
+
+    async def warm_up(self) -> None:
+        """Verify model availability and perform a small inference."""
+        await self.check_model_available()
+
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": False,
+            "keep_alive": self.keep_alive,
+            "format": WarmupOutput.model_json_schema(),
+            "options": {
+                "temperature": 0,
+                "num_predict": 64,
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        '/no_think\n'
+                        'Return exactly this JSON: '
+                        '{"status":"ready"}'
+                    ),
+                }
+            ],
+        }
+
+        try:
+            response = await self._request(payload)
+            response.raise_for_status()
+
+            data = response.json()
+
+            output = WarmupOutput.model_validate_json(
+                data["message"]["content"]
+            )
+
+            eval_count = data.get("eval_count")
+
+            if (
+                output.status != "ready"
+                or data.get("done") is not True
+                or data.get("done_reason") != "stop"
+                or type(eval_count) is not int
+                or eval_count <= 0
+            ):
+                raise LLMClientError(
+                    "Ollama hazırlık isteği tamamlanamadı."
+                )
+
+        except httpx.TimeoutException as exc:
+            raise LLMClientError(
+                "Ollama hazırlık isteği zamanında tamamlanamadı."
+            ) from exc
+
+        except httpx.HTTPError as exc:
+            raise LLMClientError(
+                "Ollama hazırlık isteği başarısız oldu."
+            ) from exc
+
+        except (ValueError, KeyError, TypeError) as exc:
+            raise LLMClientError(
+                "Ollama hazırlık isteği geçersiz çıktı üretti."
+            ) from exc
 
     async def aclose(self) -> None:
         """Ollama requests use short-lived HTTP clients."""
@@ -141,6 +244,7 @@ class OllamaLLMClient:
             "model": self.model,
             "stream": False,
             "think": False,
+            "keep_alive": self.keep_alive,
             "format": LLMOutput.model_json_schema(),
             "options": {
                 "temperature": self.temperature,

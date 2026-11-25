@@ -1,10 +1,32 @@
+import logging
 import math
 from threading import Lock
 
 from sentence_transformers import CrossEncoder
 
 from backend.app.core.config import get_settings
+from backend.app.core.exceptions import ApplicationError
 from backend.app.schemas.retrieval import RetrievedChunk
+
+logger = logging.getLogger(__name__)
+
+
+class RerankerModelError(ApplicationError):
+    """Raised when the reranker model is unavailable (HTTP 503)."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            code="reranker_unavailable",
+            message=(
+                "Yeniden sıralama modeli şu anda kullanılamıyor. "
+                "Lütfen daha sonra tekrar deneyin."
+            ),
+            status_code=503,
+        )
+        self.detail = detail
+
+    def __str__(self) -> str:
+        return self.detail
 
 
 class Reranker:
@@ -14,6 +36,48 @@ class Reranker:
         self._model_name = model_name or get_settings().reranker_model
         self._model: CrossEncoder | None = None
         self._lock = Lock()
+
+    def _get_model_locked(self) -> CrossEncoder:
+        """Return the shared model while the caller holds the lock."""
+        if self._model is None:
+            try:
+                self._model = CrossEncoder(
+                    self._model_name,
+                    device="cpu",
+                    local_files_only=True,
+                )
+            except Exception as exc:
+                logger.exception("Reranker model loading failed.")
+                raise RerankerModelError(
+                    f"Could not load reranker {self._model_name}: {exc}"
+                ) from exc
+
+        return self._model
+
+    def warm_up(self) -> None:
+        """Load the shared model and run a small inference request."""
+        with self._lock:
+            model = self._get_model_locked()
+
+            try:
+                scores = model.predict(
+                    [
+                        (
+                            "Öğrenci kayıt işlemleri",
+                            "Öğrenci kayıtları akademik takvime göre yapılır.",
+                        )
+                    ],
+                    show_progress_bar=False,
+                )
+
+                if len(scores) != 1 or not math.isfinite(float(scores[0])):
+                    raise ValueError("Invalid reranker warm-up score.")
+
+            except Exception as exc:
+                logger.exception("Reranker warm-up failed.")
+                raise RerankerModelError(f"Reranker warm-up failed: {exc}") from exc
+
+        logger.info("Reranker warm-up completed.")
 
     def rerank(
         self,
@@ -34,17 +98,16 @@ class Reranker:
         pairs = [(question, candidate.text) for candidate in candidates]
 
         with self._lock:
-            if self._model is None:
-                self._model = CrossEncoder(
-                    self._model_name,
-                    device="cpu",
-                    local_files_only=True,
-                )
+            model = self._get_model_locked()
 
-            scores = self._model.predict(
-                pairs,
-                show_progress_bar=False,
-            )
+            try:
+                scores = model.predict(
+                    pairs,
+                    show_progress_bar=False,
+                )
+            except Exception as exc:
+                logger.exception("Reranker inference failed.")
+                raise RerankerModelError(f"Reranker inference failed: {exc}") from exc
 
         if len(scores) != len(candidates):
             raise ValueError("Reranker returned an unexpected score count.")

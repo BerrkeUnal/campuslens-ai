@@ -339,3 +339,145 @@ def test_stopwords_are_read_as_utf8_and_folded(tmp_path) -> None:
 def test_invalid_batch_size_is_rejected() -> None:
     with pytest.raises(ValueError):
         make_embedder(batch_size=0)
+
+
+# Embedding warm-up ---------------------------------------------------------------
+
+
+def test_warm_up_runs_dense_and_sparse_query_inference() -> None:
+    dense = FakeDenseModel()
+    sparse = FakeSparseModel()
+    embedder = make_embedder(dense=dense, sparse=sparse)
+
+    embedder.warm_up()
+
+    question = "Öğrenci kayıt işlemleri"
+
+    assert len(dense.calls) == 1
+    assert dense.calls[0]["sentences"] == [QUERY_PREFIX + prepare_dense_query(question)]
+    assert dense.calls[0]["normalize_embeddings"] is True
+    assert sparse.query_inputs == [prepare_bm25_text(question)]
+    assert sparse.embed_inputs == []
+
+
+def test_warm_up_models_are_reused_for_later_queries() -> None:
+    created = []
+    dense = FakeDenseModel()
+    sparse = FakeSparseModel()
+
+    embedder = TextEmbedder(
+        "fake-dense",
+        "fake-sparse",
+        dense_model_factory=lambda name: created.append(name) or dense,
+        sparse_model_factory=lambda name: created.append(name) or sparse,
+    )
+
+    embedder.warm_up()
+
+    assert created == ["fake-dense", "fake-sparse"]
+
+    dense_vector = embedder.encode_query("Staj süresi nedir?")
+    sparse_vector = embedder.encode_sparse_query("Staj süresi nedir?")
+
+    assert created == ["fake-dense", "fake-sparse"]
+    assert len(dense.calls) == 2
+    assert len(sparse.query_inputs) == 2
+    assert len(dense_vector) == DIMENSION
+    assert sparse_vector.indices == [7, 9]
+
+
+@pytest.mark.parametrize("failed_model", ["dense", "sparse"])
+def test_warm_up_model_loading_failure_returns_503(failed_model) -> None:
+    def broken_factory(name):
+        raise OSError("Model missing from cache")
+
+    embedder = TextEmbedder(
+        "fake-dense",
+        "fake-sparse",
+        dense_model_factory=(
+            broken_factory if failed_model == "dense" else lambda name: FakeDenseModel()
+        ),
+        sparse_model_factory=(
+            broken_factory
+            if failed_model == "sparse"
+            else lambda name: FakeSparseModel()
+        ),
+    )
+
+    with pytest.raises(EmbeddingModelError) as error:
+        embedder.warm_up()
+
+    assert error.value.status_code == 503
+    assert error.value.code == "embedding_unavailable"
+    assert "Model missing from cache" in str(error.value)
+
+
+def test_warm_up_dense_inference_failure_returns_503() -> None:
+    class BrokenDenseModel(FakeDenseModel):
+        def encode(self, sentences, **kwargs):
+            raise RuntimeError("Dense inference failed")
+
+    embedder = make_embedder(dense=BrokenDenseModel())
+
+    with pytest.raises(EmbeddingModelError) as error:
+        embedder.warm_up()
+
+    assert error.value.status_code == 503
+    assert error.value.code == "embedding_unavailable"
+    assert "Dense inference failed" in str(error.value)
+
+
+def test_warm_up_sparse_inference_failure_returns_503() -> None:
+    class BrokenSparseModel(FakeSparseModel):
+        def query_embed(self, query):
+            raise RuntimeError("Sparse inference failed")
+
+    embedder = make_embedder(sparse=BrokenSparseModel())
+
+    with pytest.raises(EmbeddingModelError) as error:
+        embedder.warm_up()
+
+    assert error.value.status_code == 503
+    assert error.value.code == "embedding_unavailable"
+    assert "Sparse inference failed" in str(error.value)
+
+
+def test_warm_up_rejects_empty_dense_vector(monkeypatch) -> None:
+    embedder = make_embedder()
+
+    monkeypatch.setattr(embedder, "encode_query", lambda question: [])
+
+    with pytest.raises(
+        EmbeddingModelError,
+        match="Dense embedding warm-up returned an empty vector",
+    ) as error:
+        embedder.warm_up()
+
+    assert error.value.status_code == 503
+
+
+def test_warm_up_rejects_empty_sparse_vector(monkeypatch) -> None:
+    embedder = make_embedder()
+
+    monkeypatch.setattr(
+        embedder,
+        "encode_sparse_query",
+        lambda question: SimpleNamespace(indices=[], values=[]),
+    )
+
+    with pytest.raises(
+        EmbeddingModelError,
+        match="Sparse embedding warm-up returned an empty vector",
+    ) as error:
+        embedder.warm_up()
+
+    assert error.value.status_code == 503
+
+
+def test_successful_warm_up_is_logged(caplog) -> None:
+    embedder = make_embedder()
+
+    with caplog.at_level(logging.INFO):
+        embedder.warm_up()
+
+    assert "Embedding warm-up completed." in caplog.text
