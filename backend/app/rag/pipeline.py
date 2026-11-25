@@ -20,6 +20,7 @@ from backend.app.schemas.questions import (
 )
 from backend.app.schemas.retrieval import (
     RetrievalMethod,
+    RetrievedChunk,
     SourceResponse,
 )
 
@@ -67,10 +68,26 @@ class RAGPipeline:
                 method,
             )
 
-        context = candidates[:5]
-
         retrieval_latency_ms = int((perf_counter() - retrieval_start) * 1000)
+        return await self.answer_with_context(
+            question,
+            candidates,
+            total_start=total_start,
+            retrieval_latency_ms=retrieval_latency_ms,
+        )
 
+    async def answer_with_context(
+        self,
+        question: str,
+        candidates: list[RetrievedChunk],
+        *,
+        total_start: float | None = None,
+        retrieval_latency_ms: int = 0,
+    ) -> PipelineResult:
+        """Generate from the same retrieved chunks used by the question or evaluation flow."""
+        if total_start is None:
+            total_start = perf_counter()
+        context = candidates[:5]
         if not context:
             return PipelineResult(
                 answer=("Bu soruyu yanıtlamak için yeterli kaynak bulunamadı."),

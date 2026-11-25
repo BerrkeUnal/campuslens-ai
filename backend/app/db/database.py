@@ -45,6 +45,20 @@ CREATE TABLE IF NOT EXISTS evaluation_case_results (
     latency_ms REAL NOT NULL CHECK (latency_ms >= 0),
     PRIMARY KEY (run_id, case_id)
 );
+CREATE TABLE IF NOT EXISTS evaluation_abstentions (
+    run_id TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    insufficient_context INTEGER CHECK (insufficient_context IN (0, 1)),
+    answer TEXT,
+    error_message TEXT,
+    CHECK (
+        (insufficient_context IS NOT NULL AND answer IS NOT NULL AND error_message IS NULL)
+        OR (insufficient_context IS NULL AND answer IS NULL AND error_message IS NOT NULL)
+    ),
+    PRIMARY KEY (run_id, case_id),
+    FOREIGN KEY (run_id, case_id) REFERENCES evaluation_case_results(run_id, case_id)
+        ON DELETE CASCADE
+);
 """
 
 
@@ -85,9 +99,8 @@ class SQLiteDatabase:
     async def health_status(self) -> str:
         """Return the SQLite availability without raising an exception."""
         try:
-            async with self.connect() as connection:
-                async with connection.execute("SELECT 1") as cursor:
-                    row = await cursor.fetchone()
+            async with self.connect() as connection, connection.execute("SELECT 1") as cursor:
+                row = await cursor.fetchone()
 
             if row is not None and row[0] == 1:
                 return "ok"

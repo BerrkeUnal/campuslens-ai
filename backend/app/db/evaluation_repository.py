@@ -14,6 +14,15 @@ from backend.app.schemas.evaluations import (
 from backend.app.services.evaluation_metrics import RetrievalCaseResult
 from backend.app.services.retrieval_evaluation import RetrievalEvaluation
 
+RUN_RESULTS = """SELECT runs.*,
+       (SELECT AVG(a.insufficient_context) FROM evaluation_abstentions AS a
+        WHERE a.run_id = runs.run_id) AS abstention_accuracy,
+       (SELECT COUNT(*) FROM evaluation_abstentions AS a
+        WHERE a.run_id = runs.run_id) AS abstention_total,
+       (SELECT COUNT(a.insufficient_context) FROM evaluation_abstentions AS a
+        WHERE a.run_id = runs.run_id) AS abstention_evaluated
+FROM evaluation_runs AS runs WHERE runs.is_mock = 0"""
+
 
 def to_result(row: Row) -> EvaluationResultResponse:
     metrics = None
@@ -23,6 +32,9 @@ def to_result(row: Row) -> EvaluationResultResponse:
             recall_at_5=row["recall_at_5"],
             mrr_at_5=row["mrr_at_5"],
             average_latency_ms=row["average_latency_ms"],
+            abstention_accuracy=row["abstention_accuracy"],
+            abstention_total=row["abstention_total"],
+            abstention_evaluated=row["abstention_evaluated"],
         )
     return EvaluationResultResponse.model_validate({**dict(row), "metrics": metrics})
 
@@ -88,6 +100,18 @@ class SQLiteEvaluationRepository:
                     for case in evaluation.cases
                 ],
             )
+            await connection.executemany(
+                """INSERT INTO evaluation_abstentions
+                   (run_id, case_id, insufficient_context, answer, error_message) VALUES (?, ?, ?, ?, ?)""",
+                [
+                    (
+                        str(run_id), case.case_id, case.insufficient_context,
+                        case.answer, case.answer_error,
+                    )
+                    for case in evaluation.cases
+                    if not case.answerable
+                ],
+            )
             await connection.commit()
 
     async def fail_run(self, run_id: UUID, message: str) -> None:
@@ -101,7 +125,7 @@ class SQLiteEvaluationRepository:
 
     async def get_result(self, run_id: UUID) -> EvaluationResultResponse | None:
         async with self._database.connect() as connection, connection.execute(
-            "SELECT * FROM evaluation_runs WHERE run_id = ?", (str(run_id),)
+            f"{RUN_RESULTS} AND runs.run_id = ?", (str(run_id),)
         ) as cursor:
             row = await cursor.fetchone()
         return to_result(row) if row is not None else None
@@ -109,15 +133,25 @@ class SQLiteEvaluationRepository:
     async def list_results(self) -> list[EvaluationResultResponse]:
         async with self._database.connect() as connection:
             rows = await connection.execute_fetchall(
-                "SELECT * FROM evaluation_runs ORDER BY started_at DESC, run_id"
+                f"{RUN_RESULTS} ORDER BY started_at DESC, run_id"
             )
         return [to_result(row) for row in rows]
 
     async def list_case_results(self, run_id: UUID) -> list[RetrievalCaseResult]:
         async with self._database.connect() as connection:
             rows = await connection.execute_fetchall(
-                """SELECT case_id, source_rank, latency_ms FROM evaluation_case_results
-                   WHERE run_id = ? ORDER BY rowid""",
+                """SELECT r.case_id, r.source_rank, r.latency_ms, a.insufficient_context, a.answer, a.error_message
+                   FROM evaluation_case_results AS r LEFT JOIN evaluation_abstentions AS a
+                       ON a.run_id = r.run_id AND a.case_id = r.case_id
+                   WHERE r.run_id = ? ORDER BY r.rowid""",
                 (str(run_id),),
             )
-        return [RetrievalCaseResult(**dict(row)) for row in rows]
+        return [
+            RetrievalCaseResult(
+                row["case_id"], row["source_rank"], row["latency_ms"],
+                None if row["insufficient_context"] is None else bool(row["insufficient_context"]),
+                row["answer"],
+                row["error_message"],
+            )
+            for row in rows
+        ]

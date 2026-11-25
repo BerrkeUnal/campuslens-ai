@@ -24,6 +24,13 @@ class RetrievalCaseResult:
     case_id: str
     source_rank: int | None
     latency_ms: float
+    insufficient_context: bool | None = None
+    answer: str | None = None
+    answer_error: str | None = None
+
+    @property
+    def answerable(self) -> bool:
+        return self.insufficient_context is None and self.answer_error is None
 
     @property
     def source_hit(self) -> bool:
@@ -40,15 +47,19 @@ class RetrievalMetrics:
     recall_at_5: float
     mrr_at_5: float
     average_latency_ms: float
+    abstention_accuracy: float | None = None
 
 
 def summarize_retrieval(results: Sequence[RetrievalCaseResult]) -> RetrievalMetrics:
     total = len(results)
     if total == 0:
         return RetrievalMetrics(0, 0.0, 0.0, 0.0)
+    answerable = [result for result in results if result.answerable]
+    abstentions = [result.insufficient_context for result in results if result.insufficient_context is not None]
     return RetrievalMetrics(
         total_cases=total,
-        recall_at_5=sum(result.source_hit for result in results) / total,
-        mrr_at_5=sum(result.reciprocal_rank for result in results) / total,
+        recall_at_5=sum(result.source_hit for result in answerable) / len(answerable) if answerable else 0.0,
+        mrr_at_5=sum(result.reciprocal_rank for result in answerable) / len(answerable) if answerable else 0.0,
         average_latency_ms=sum(result.latency_ms for result in results) / total,
+        abstention_accuracy=sum(abstentions) / len(abstentions) if abstentions else None,
     )

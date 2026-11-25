@@ -50,7 +50,7 @@
       <div class="stack">
         <section class="card" aria-labelledby="run-heading">
           <h2 id="run-heading" class="card__title"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-play"></use></svg>Değerlendirme koşusu başlat</h2>
-          <p class="card__subtitle">Her koşu doğru kaynağı bulma, doğru cevap, uydurma (hallucination) oranı, süre ve maliyet metriklerini üretir.</p>
+          <p class="card__subtitle">Kaynak sıralaması 42 cevaplanabilir soruda, yetersiz kaynak yanıtı 8 cevapsız soruda ölçülür. Arama süresi 50 sorunun tamamını kapsar.</p>
           <form id="evaluation-form" class="section-spaced" novalidate>
             <div class="form-row">
               <div class="field">
@@ -66,7 +66,6 @@
               <div class="field">
                 <label for="eval-split">Soru seti</label>
                 <select id="eval-split" name="split">
-                  <option value="validation" selected>Doğrulama (validation)</option>
                   <option value="test">Test</option>
                 </select>
               </div>

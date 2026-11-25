@@ -252,7 +252,7 @@ export function deleteDocument(documentId) {
 }
 
 /** POST /api/evaluations/run */
-export function runEvaluation({ method, split = "validation" }) {
+export function runEvaluation({ method, split = "test" }) {
   if (MOCK_MODE) return mockApi.runEvaluation({ method, split });
   return apiRequest("/evaluations/run", { method: "POST", json: { method, split }, timeoutMs: 300_000 });
 }

@@ -4,6 +4,7 @@ import pytest
 
 from backend.app.core.exceptions import ServiceUnavailableError
 from backend.app.ports.vector_store import VectorStore
+from backend.app.rag.retriever import Retriever
 from backend.app.schemas.retrieval import RetrievalMethod, RetrievedChunk
 from backend.app.services.evaluation_cases import load_evaluation_cases
 from backend.app.services.retrieval_evaluation import RetrievalEvaluationRunner
@@ -38,8 +39,8 @@ async def test_evaluation_dispatches_search_with_catalog_url(
             retrieval_score=1.0,
         ),
     ]
-    result = await RetrievalEvaluationRunner(store, rerank, is_mock=True).evaluate(method, [item])
-    search.assert_awaited_once_with(item.case.question, 5)
+    result = await RetrievalEvaluationRunner(Retriever(store), rerank, is_mock=True).evaluate(method, [item])
+    search.assert_awaited_once_with(item.case.question, 5 if search_name == "rerank" else 20)
     assert result.cases[0].case_id == item.case.case_id
     assert result.cases[0].source_rank == 1
     assert result.metrics.recall_at_5 == result.metrics.mrr_at_5 == 1
@@ -49,7 +50,28 @@ async def test_evaluation_dispatches_search_with_catalog_url(
 async def test_unconfigured_reranker_does_not_create_results() -> None:
     store = create_autospec(VectorStore, instance=True)
     with pytest.raises(ServiceUnavailableError, match="Hybrid"):
-        await RetrievalEvaluationRunner(store, is_mock=True).evaluate(
+        await RetrievalEvaluationRunner(Retriever(store), is_mock=True).evaluate(
             RetrievalMethod.HYBRID_RERANK, load_evaluation_cases()
         )
     store.search_hybrid_rrf.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_answer_generation_keeps_retrieval_metrics() -> None:
+    cases = load_evaluation_cases()
+    answerable, unanswerable = cases[0], cases[-1]
+    store = create_autospec(VectorStore, instance=True)
+    store.search_dense.return_value = []
+    answer = AsyncMock(side_effect=ServiceUnavailableError("Ollama"))
+    runner = RetrievalEvaluationRunner(
+        Retriever(store), is_mock=True, answer_with_context=answer
+    )
+
+    result = await runner.evaluate(RetrievalMethod.DENSE, [answerable, unanswerable])
+
+    assert result.metrics.total_cases == 2
+    assert result.metrics.recall_at_5 == 0
+    assert result.metrics.abstention_accuracy is None
+    assert result.cases[-1].insufficient_context is None
+    assert "Ollama" in (result.cases[-1].answer_error or "")
+    assert not result.cases[-1].answerable

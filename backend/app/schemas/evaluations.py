@@ -20,7 +20,7 @@ class EvaluationStatus(StrEnum):
 
 class EvaluationRunRequest(BaseModel):
     method: RetrievalMethod
-    split: EvaluationSplit = EvaluationSplit.VALIDATION
+    split: EvaluationSplit = EvaluationSplit.TEST
 
 
 class EvaluationMetricsResponse(BaseModel):
@@ -30,6 +30,8 @@ class EvaluationMetricsResponse(BaseModel):
     answer_correctness: float | None = Field(default=None, ge=0, le=2)
     hallucination_rate: float | None = Field(default=None, ge=0, le=1)
     abstention_accuracy: float | None = Field(default=None, ge=0, le=1)
+    abstention_total: int = Field(default=0, ge=0)
+    abstention_evaluated: int = Field(default=0, ge=0)
     average_latency_ms: float = Field(ge=0)
     total_cost_usd: float | None = Field(default=None, ge=0)
 
