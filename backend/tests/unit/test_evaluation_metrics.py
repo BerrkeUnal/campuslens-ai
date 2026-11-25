@@ -66,3 +66,17 @@ def test_recall_and_mrr_include_misses_in_denominator() -> None:
 
 def test_empty_case_set_has_zero_metrics() -> None:
     assert summarize_retrieval([]) == RetrievalMetrics(0, 0.0, 0.0, 0.0)
+
+
+def test_unanswerable_cases_have_their_own_accuracy_denominator() -> None:
+    found = RetrievalCaseResult("hit", 1, 5)
+    missed = RetrievalCaseResult("miss", None, 15)
+    refused = RetrievalCaseResult("unanswerable-1", None, 10, True, "Insufficient evidence.")
+    guessed = RetrievalCaseResult("unanswerable-2", None, 10, False, "Unsupported claim.")
+
+    metrics = summarize_retrieval([found, missed, refused, guessed])
+
+    assert metrics.total_cases == 4
+    assert metrics.recall_at_5 == metrics.mrr_at_5 == 0.5
+    assert metrics.abstention_accuracy == 0.5
+    assert metrics.average_latency_ms == 10

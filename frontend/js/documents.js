@@ -38,10 +38,18 @@ export function setUploadState(state, { message, error } = {}) {
   const box = dom.uploadStatus;
   box.className = "section-spaced";
   box.removeAttribute("role");
-  box.hidden = state === "idle" || state === "uploading";
+  box.hidden = state === "idle";
   setButtonBusy(dom.uploadSubmit, state === "uploading", "Yükleniyor…");
 
-  if (state === "success") {
+  if (state === "uploading") {
+    // Backend belgeyi yükleme isteği içinde metne çevirip indeksler; büyük PDF'lerde dakikalar sürebilir.
+    box.classList.add("notice", "notice--info");
+    box.setAttribute("role", "status");
+    box.replaceChildren(
+      el("span", { className: "spinner", attrs: { "aria-hidden": "true" } }),
+      el("p", { text: "Belge yükleniyor ve indeksleniyor. Büyük belgelerde bu işlem birkaç dakika sürebilir; sayfayı kapatmayın." }),
+    );
+  } else if (state === "success") {
     box.classList.add("notice", "notice--success");
     box.replaceChildren(icon("check-circle"), el("p", { text: message }));
   } else if (state === "error") {

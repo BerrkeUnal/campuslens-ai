@@ -50,7 +50,7 @@
       <div class="stack">
         <section class="card" aria-labelledby="run-heading">
           <h2 id="run-heading" class="card__title"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-play"></use></svg>Değerlendirme koşusu başlat</h2>
-          <p class="card__subtitle">Her koşu doğru kaynağı bulma, doğru cevap, uydurma (hallucination) oranı, süre ve maliyet metriklerini üretir.</p>
+          <p class="card__subtitle">Kaynak sıralaması 42 cevaplanabilir soruda, yetersiz kaynak yanıtı 8 cevapsız soruda ölçülür. Arama süresi 50 sorunun tamamını kapsar.</p>
           <form id="evaluation-form" class="section-spaced" novalidate>
             <div class="form-row">
               <div class="field">
@@ -66,7 +66,6 @@
               <div class="field">
                 <label for="eval-split">Soru seti</label>
                 <select id="eval-split" name="split">
-                  <option value="validation" selected>Doğrulama (validation)</option>
                   <option value="test">Test</option>
                 </select>
               </div>
@@ -91,7 +90,9 @@
           <div id="results-loading" class="state state--loading"><span class="spinner" aria-hidden="true"></span><span>Sonuçlar yükleniyor…</span></div>
           <div id="results-error" hidden></div>
           <div id="results-empty" class="state" hidden>
-            <p>Bu soru seti için henüz tamamlanmış bir değerlendirme yok. Yukarıdan bir koşu başlatın.</p>
+            <p id="results-empty-title" class="state__title">Henüz değerlendirme çalıştırılmadı</p>
+            <p id="results-empty-text">Metrikler yalnızca gerçek bir değerlendirme koşusu tamamlandığında gösterilir. Yukarıdan bir koşu başlatın.</p>
+            <p id="results-empty-note" class="muted" hidden></p>
           </div>
 
           <div id="comparison-wrap" class="table-wrap" hidden>
@@ -109,7 +110,7 @@
 
         <section class="card" aria-labelledby="history-heading">
           <h2 id="history-heading" class="card__title"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-clock"></use></svg>Koşu geçmişi</h2>
-          <p id="history-empty" class="muted section-spaced">Henüz koşu yok.</p>
+          <p id="history-empty" class="muted section-spaced">Henüz değerlendirme çalıştırılmadı.</p>
           <div id="history-wrap" class="table-wrap section-spaced" hidden>
             <table>
               <caption class="visually-hidden">Tüm değerlendirme koşuları</caption>

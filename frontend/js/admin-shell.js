@@ -1,7 +1,7 @@
 // Admin sayfalarının ortak üst barı: demo oturum kontrolü, çıkış, mock düğmesi, sunucu durumu.
 
 import { logoutAdmin, requireAdminSession } from "./auth.js";
-import { initMockToggle, initStatus } from "./ui.js";
+import { initMockBanner, initMockToggle, initStatus } from "./ui.js";
 
 /**
  * Her admin sayfasının başında çağrılır.
@@ -13,6 +13,7 @@ export function initAdminShell() {
   document.querySelectorAll("[data-logout]").forEach((button) => {
     button.addEventListener("click", logoutAdmin);
   });
+  initMockBanner();
   initMockToggle(document.querySelector("[data-mock-toggle]"));
   initStatus(document.querySelector("[data-status]"), { hideWhenMock: true });
   return true;

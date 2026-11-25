@@ -170,8 +170,34 @@ export function initStatus(node, { quietWhenOk = false, hideWhenMock = false } =
   }
   set("unknown", "Sunucu kontrol ediliyor…");
   getHealth()
-    .then(() => set("ok", "Sunucu çalışıyor"))
+    .then((health) => {
+      // /health "degraded": backend açık ama veritabanı veya Qdrant hazır değil.
+      if (health && health.status === "degraded") set("degraded", "Sunucu kısmen hazır");
+      else set("ok", "Sunucu çalışıyor");
+    })
     .catch(() => set("down", "Sunucuya ulaşılamıyor"));
+}
+
+/**
+ * Mock modu açıksa sayfanın en üstüne belirgin bir uyarı bandı ekler; kapalıysa hiçbir şey yapmaz.
+ * Ekrandaki verilerin geliştirme amaçlı örnek veri olduğu her sayfada açıkça görünür.
+ */
+export function initMockBanner() {
+  if (!MOCK_MODE || document.querySelector(".mock-banner")) return;
+  const button = el("button", { className: "mock-banner__button", text: "Mock modu kapat", attrs: { type: "button" } });
+  button.addEventListener("click", () => setMockMode(false));
+  const banner = el("div", { className: "mock-banner", attrs: { role: "note", "aria-label": "Geliştirme modu" } }, [
+    icon("alert"),
+    el("p", { className: "mock-banner__text" }, [
+      el("strong", { text: "Geliştirme modu (mock): " }),
+      "Bu ekrandaki yanıtlar ve belgeler örnek veridir, gerçek değildir. Backend'e bağlanılmıyor.",
+    ]),
+    button,
+  ]);
+  document.body.classList.add("has-mock-banner");
+  const skipLink = document.querySelector(".skip-link");
+  if (skipLink) skipLink.after(banner);
+  else document.body.prepend(banner);
 }
 
 export function initMockToggle(button) {

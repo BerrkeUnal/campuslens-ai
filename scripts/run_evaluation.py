@@ -16,8 +16,8 @@ from backend.app.schemas.evaluations import (
 )
 from backend.app.schemas.retrieval import RetrievalMethod
 from backend.app.services.sqlite_evaluation_service import (
-    get_hybrid_rerank_search,
-    get_sqlite_evaluation_service,
+    SQLiteEvaluationService,
+    create_evaluation_runner,
 )
 
 
@@ -26,24 +26,20 @@ async def run(method: RetrievalMethod, split: EvaluationSplit) -> int:
     await database.initialize()
     store = get_vector_store()
     try:
-        service = get_sqlite_evaluation_service(
-            database,
-            store,
-            hybrid_rerank=get_hybrid_rerank_search(),
-        )
-        run_result = await service.run_evaluation(
-            EvaluationRunRequest(method=method, split=split)
-        )
+        repository = SQLiteEvaluationRepository(database)
+        service = SQLiteEvaluationService(repository, lambda: create_evaluation_runner(store))
+        run_result = await service.run_evaluation(EvaluationRunRequest(method=method, split=split))
         result = await service.get_result(run_result.run_id)
         assert result is not None
-        repository = SQLiteEvaluationRepository(database)
         cases = await repository.list_case_results(run_result.run_id)
         output = result.model_dump(mode="json")
         output["cases"] = [
             {
                 **asdict(case),
-                "source_hit": case.source_hit,
-                "reciprocal_rank": case.reciprocal_rank,
+                "source_hit": case.source_hit if case.answerable else None,
+                "reciprocal_rank": (
+                    case.reciprocal_rank if case.answerable else None
+                ),
             }
             for case in cases
         ]
@@ -55,14 +51,10 @@ async def run(method: RetrievalMethod, split: EvaluationSplit) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--method", type=RetrievalMethod, choices=list(RetrievalMethod), required=True)
     parser.add_argument(
-        "--method", type=RetrievalMethod, choices=list(RetrievalMethod), required=True
-    )
-    parser.add_argument(
-        "--split",
-        type=EvaluationSplit,
-        choices=list(EvaluationSplit),
-        default=EvaluationSplit.VALIDATION,
+        "--split", type=EvaluationSplit, choices=list(EvaluationSplit),
+        default=EvaluationSplit.TEST,
     )
     args = parser.parse_args()
     return asyncio.run(run(args.method, args.split))

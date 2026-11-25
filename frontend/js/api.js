@@ -9,6 +9,11 @@ import { mockApi } from "./mock-data.js";
 export const API_BASE_URL = "http://127.0.0.1:8000/api";
 
 export const REQUEST_TIMEOUT_MS = 60_000;
+// İlk soruda reranker ve LLM modelleri yüklenirken yanıt 60 saniyeyi aşabilir.
+export const QUESTION_TIMEOUT_MS = 180_000;
+// Yükleme sırasında PDF metne çevrilip indekslenir; büyük belgelerde birkaç dakika sürebilir.
+export const UPLOAD_TIMEOUT_MS = 300_000;
+const REACHABILITY_TIMEOUT_MS = 4000;
 export const MAX_UPLOAD_MB = 20; // backend .env MAX_UPLOAD_MB ile aynı tutulmalı
 
 export const RETRIEVAL_METHODS = ["bm25", "dense", "hybrid", "hybrid_rerank"];
@@ -26,32 +31,46 @@ export const METHOD_LABELS = {
 
 const MOCK_STORAGE_KEY = "campuslens.mock";
 
-function resolveMockMode() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("mock")) {
-    const enabled = params.get("mock") !== "0";
-    try {
-      window.localStorage.setItem(MOCK_STORAGE_KEY, enabled ? "1" : "0");
-    } catch {
-      /* depolama kapalı olabilir; sorun değil */
-    }
-    return enabled;
-  }
+// Mock modu yalnızca geliştirme ve demo içindir; teslim sürümünde varsayılan olarak KAPALIDIR.
+// Yalnızca adrese ?mock=1 eklenerek veya admin üst barındaki düğmeyle, o sekme için açılır
+// (sessionStorage). Sekme kapanınca kendiliğinden kapanır; kalıcı olarak açık kalmaz.
+function readSessionFlag() {
   try {
-    return window.localStorage.getItem(MOCK_STORAGE_KEY) === "1";
+    return window.sessionStorage.getItem(MOCK_STORAGE_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-export const MOCK_MODE = resolveMockMode();
-
-export function setMockMode(enabled) {
+function writeSessionFlag(enabled) {
   try {
-    window.localStorage.setItem(MOCK_STORAGE_KEY, enabled ? "1" : "0");
+    if (enabled) window.sessionStorage.setItem(MOCK_STORAGE_KEY, "1");
+    else window.sessionStorage.removeItem(MOCK_STORAGE_KEY);
+  } catch {
+    /* depolama kapalı olabilir; sorun değil */
+  }
+}
+
+function resolveMockMode() {
+  // Önceki sürümler bu ayarı kalıcı (localStorage) tutuyordu; teslimde açık kalmasın diye temizlenir.
+  try {
+    window.localStorage.removeItem(MOCK_STORAGE_KEY);
   } catch {
     /* yoksay */
   }
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("mock")) {
+    const enabled = params.get("mock") === "1";
+    writeSessionFlag(enabled);
+    return enabled;
+  }
+  return readSessionFlag();
+}
+
+export const MOCK_MODE = resolveMockMode();
+
+export function setMockMode(enabled) {
+  writeSessionFlag(enabled);
   const url = new URL(window.location.href);
   url.searchParams.delete("mock");
   window.location.replace(url.toString());
@@ -102,10 +121,11 @@ function toApiError(response, body) {
   const status = response.status;
   let message = null;
 
+  // Backend'in Türkçe mesajı varsa her zaman o gösterilir; yoksa duruma göre Türkçe bir metin.
   if (body && typeof body.message === "string" && body.message.trim()) {
-    message = body.message;
+    message = body.message.trim();
   } else if (body && typeof body.detail === "string" && body.detail.trim()) {
-    message = body.detail;
+    message = body.detail.trim();
   }
 
   if (!message) {
@@ -118,6 +138,20 @@ function toApiError(response, body) {
     requestId: (body && body.request_id) || response.headers.get("X-Request-ID"),
     details: (body && Array.isArray(body.details) && body.details) || null,
   });
+}
+
+/** Sunucu ayakta mı? Herhangi bir HTTP yanıtı (hata kodu dahil) "ulaşılabilir" sayılır. */
+async function isServerReachable() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REACHABILITY_TIMEOUT_MS);
+  try {
+    await fetch(`${API_BASE_URL}/health`, { signal: controller.signal, cache: "no-store" });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -150,16 +184,25 @@ export async function apiRequest(path, { method = "GET", json, formData, timeout
   try {
     response = await fetch(`${API_BASE_URL}${path}`, init);
   } catch (error) {
+    clearTimeout(timer);
     if (error && error.name === "AbortError") {
-      throw new ApiError("Sunucu zamanında yanıt vermedi. Lütfen tekrar deneyin.", { code: "timeout" });
+      throw new ApiError("Sunucu zamanında yanıt vermedi. Lütfen biraz sonra tekrar deneyin.", { code: "timeout" });
+    }
+    // fetch yalnızca "TypeError" verir: bağlantı hiç kurulamamış da olabilir, sunucu bir hata
+    // döndürüp tarayıcı yanıtı okuyamamış da olabilir. "Sunucuya bağlanılamadı" yalnızca
+    // sunucuya gerçekten ulaşılamıyorsa gösterilir.
+    if (path !== "/health" && (await isServerReachable())) {
+      throw new ApiError(
+        "Sunucu isteği işlerken bir hata oluştu ve ayrıntı alınamadı. Lütfen tekrar deneyin.",
+        { code: "unreadable_response" },
+      );
     }
     throw new ApiError(
-      "Sunucuya bağlanılamadı. Lütfen daha sonra tekrar deneyin.",
+      "Sunucuya bağlanılamadı. İnternet bağlantınızı veya sunucunun çalıştığını kontrol edin.",
       { code: "network_error" },
     );
-  } finally {
-    clearTimeout(timer);
   }
+  clearTimeout(timer);
 
   if (response.status === 204) return null;
 
@@ -183,7 +226,7 @@ export function askQuestion(question, method = "hybrid_rerank") {
     return Promise.reject(new ApiError("Geçersiz arama yöntemi seçildi.", { code: "invalid_method" }));
   }
   if (MOCK_MODE) return mockApi.askQuestion(question, method);
-  return apiRequest("/questions/ask", { method: "POST", json: { question, method } });
+  return apiRequest("/questions/ask", { method: "POST", json: { question, method }, timeoutMs: QUESTION_TIMEOUT_MS });
 }
 
 /** POST /api/documents/upload (multipart: file, title, source_url) */
@@ -193,7 +236,7 @@ export function uploadDocument({ file, title, sourceUrl }) {
   formData.append("file", file);
   formData.append("title", title);
   formData.append("source_url", sourceUrl);
-  return apiRequest("/documents/upload", { method: "POST", formData, timeoutMs: 120_000 });
+  return apiRequest("/documents/upload", { method: "POST", formData, timeoutMs: UPLOAD_TIMEOUT_MS });
 }
 
 /** GET /api/documents */
@@ -209,7 +252,7 @@ export function deleteDocument(documentId) {
 }
 
 /** POST /api/evaluations/run */
-export function runEvaluation({ method, split = "validation" }) {
+export function runEvaluation({ method, split = "test" }) {
   if (MOCK_MODE) return mockApi.runEvaluation({ method, split });
   return apiRequest("/evaluations/run", { method: "POST", json: { method, split }, timeoutMs: 300_000 });
 }

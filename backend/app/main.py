@@ -74,6 +74,7 @@ def create_app(
     app.state.database = database
     app.state.model_readiness = readiness_manager
     app.state.model_warmup_task = None
+    app.state.evaluation_lock = asyncio.Lock()
 
     cors_allowed_origins = (
         (settings.frontend_origin,) if settings.app_env == "development" else ()

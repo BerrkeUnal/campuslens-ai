@@ -5,7 +5,6 @@ import { initAdminShell } from "./admin-shell.js";
 import { METHOD_LABELS, RETRIEVAL_METHODS, getEvaluationResults, runEvaluation } from "./api.js";
 import {
   el,
-  formatCost,
   formatDate,
   formatDecimal,
   formatMs,
@@ -22,29 +21,24 @@ const STATUS_LABELS = { running: "Çalışıyor", completed: "Tamamlandı", fail
 const METRIC_COLUMNS = [
   { key: "recall_at_5", label: "Source Recall@5", better: "high", format: formatPercent, bar: true },
   { key: "mrr_at_5", label: "MRR@5", better: "high", format: (v) => formatDecimal(v, 2) },
-  { key: "answer_correctness", label: "Answer correctness", better: "high", format: (v) => formatDecimal(v, 2) },
-  { key: "hallucination_rate", label: "Hallucination", better: "low", format: formatPercent, bar: true },
-  { key: "abstention_accuracy", label: "Abstention acc.", better: "high", format: formatPercent },
-  { key: "average_latency_ms", label: "Ort. süre", better: "low", format: formatMs },
-  { key: "total_cost_usd", label: "Toplam maliyet", better: "low", format: formatCost },
+  { key: "abstention_accuracy", label: "Cevapsız soru doğruluğu", better: "high", format: formatPercent },
+  { key: "average_latency_ms", label: "Ort. arama süresi", better: "low", format: formatMs },
   { key: "total_cases", label: "Soru", better: null, format: (v) => String(v ?? "—") },
 ];
 
 const POLL_INTERVAL_MS = 3000;
-const POLL_MAX_DURATION_MS = 10 * 60 * 1000;
 
 const dom = {};
 let running = false;
 let refreshing = false;
 let pollTimer = null;
-let pollStartedAt = 0;
 let lastResults = [];
 
 // ---------------------------------------------------------------------------
 // Koşu durumu
 // ---------------------------------------------------------------------------
 
-/** @param {"idle"|"running"|"completed"|"error"} state */
+/** @param {"idle"|"running"|"completed"|"info"|"error"} state */
 function setRunState(state, { message, error } = {}) {
   const box = dom.status;
   box.className = "section-spaced";
@@ -61,6 +55,12 @@ function setRunState(state, { message, error } = {}) {
   } else if (state === "completed") {
     box.classList.add("notice", "notice--success");
     box.replaceChildren(icon("check-circle"), el("div", {}, [el("p", { text: message })]));
+  } else if (state === "info") {
+    box.classList.add("notice", "notice--warning");
+    box.replaceChildren(
+      icon("info"),
+      el("div", {}, [el("p", { className: "notice__title", text: message.title }), el("p", { text: message.text })]),
+    );
   } else if (state === "error") {
     renderError(box, error || { message }, "Değerlendirme başlatılamadı");
   }
@@ -84,14 +84,14 @@ export async function startEvaluation(event) {
     }
 
     const stillRunning = started.some((run) => run.status === "running");
+    const failed = started.filter((run) => run.status === "failed").length;
     setRunState(stillRunning ? "running" : "completed", {
       message: stillRunning
         ? "Koşular başlatıldı; sonuçlar hazır oldukça tablo otomatik güncellenecek."
-        : `${started.length} koşu tamamlandı.`,
+        : failed
+          ? `${started.length} koşudan ${failed} tanesi başarısız oldu. Ayrıntı için koşu geçmişine bakın.`
+          : `${started.length} koşu tamamlandı.`,
     });
-    if (started.some((run) => run.is_mock)) {
-      dom.status.lastElementChild.append(el("p", { className: "muted", text: "Not: backend şu an mock metrik döndürüyor." }));
-    }
   } catch (error) {
     setRunState("error", { error });
     if (started.length) {
@@ -113,7 +113,7 @@ export async function startEvaluation(event) {
 function latestCompletedByMethod(results, split) {
   const latest = new Map();
   for (const result of results) {
-    if (result.split !== split || result.status !== "completed" || !result.metrics) continue;
+    if (result.is_mock || result.split !== split || result.status !== "completed" || !result.metrics) continue;
     const current = latest.get(result.method);
     if (!current || new Date(result.started_at) > new Date(current.started_at)) {
       latest.set(result.method, result);
@@ -133,8 +133,15 @@ function bestValues(rows) {
   return best;
 }
 
-function metricCell(column, value, best) {
+function metricCell(column, value, best, metrics) {
+  if (column.key === "abstention_accuracy" && metrics.abstention_total > 0) {
+    const coverage = `${metrics.abstention_evaluated}/${metrics.abstention_total}`;
+    const cell = el("td", { className: "num", text: `${column.format(value)} (${coverage})` });
+    cell.title = "Ölçülebilen soru / toplam cevapsız soru";
+    return cell;
+  }
   const cell = el("td", { className: "num", text: column.format(value) });
+  if (typeof value !== "number") cell.title = "Bu metrik bu koşuda hesaplanmadı.";
   if (typeof value === "number" && best[column.key] === value) {
     cell.classList.add("is-best");
     cell.append(el("span", { className: "visually-hidden", text: " (en iyi)" }));
@@ -158,6 +165,7 @@ export function renderComparisonTable(results, split = dom.split.value) {
   dom.comparisonSplit.textContent = `${SPLIT_LABELS[split] || split} seti`;
 
   if (!latest.size) {
+    renderEmptyState(results, split);
     showResultsState("empty");
     return;
   }
@@ -180,18 +188,61 @@ export function renderComparisonTable(results, split = dom.split.value) {
       return el("tr", {}, [nameCell, ...METRIC_COLUMNS.map(() => el("td", { className: "num", text: "—" }))]);
     }
 
-    const meta = el("div", { className: "muted", text: formatDate(result.completed_at || result.started_at) });
-    if (result.is_mock) meta.append(" ", el("span", { className: "pill pill--mock", text: "mock" }));
-    nameCell.append(meta);
-    return el("tr", {}, [nameCell, ...METRIC_COLUMNS.map((column) => metricCell(column, result.metrics[column.key], best))]);
+    nameCell.append(el("div", { className: "muted", text: formatDate(result.completed_at || result.started_at) }));
+    return el("tr", {}, [nameCell, ...METRIC_COLUMNS.map((column) => metricCell(column, result.metrics[column.key], best, result.metrics))]);
   });
 
   dom.comparisonBody.replaceChildren(...rows);
   showResultsState("table");
 }
 
+/** Gerçek sonuç yoksa sayı yerine açıklayıcı boş durum gösterilir. */
+function renderEmptyState(results, split) {
+  const realRuns = realResults(results);
+  const splitRuns = realRuns.filter((result) => result.split === split);
+  if (splitRuns.some((result) => result.status === "running")) {
+    dom.emptyTitle.textContent = "Değerlendirme çalışıyor";
+    dom.emptyText.textContent = "Koşu tamamlandığında metrikler burada görünecek.";
+  } else if (splitRuns.length > 0) {
+    dom.emptyTitle.textContent = `${SPLIT_LABELS[split] || split} seti için tamamlanmış değerlendirme yok`;
+    dom.emptyText.textContent = "Başarısız koşuların ayrıntılarını koşu geçmişinden kontrol edin.";
+  } else {
+    dom.emptyTitle.textContent = "Henüz değerlendirme çalıştırılmadı";
+    dom.emptyText.textContent = "Sonuç görmek için yukarıdan bir değerlendirme başlatın.";
+  }
+
+  const mockCount = results.length - realRuns.length;
+  dom.emptyNote.hidden = mockCount === 0;
+  dom.emptyNote.textContent = mockCount
+    ? `Backend'in döndürdüğü ${mockCount} örnek (mock) koşu gerçek ölçüm olmadığı için gösterilmiyor.`
+    : "";
+}
+
+/** Backend'in is_mock olarak işaretlediği sonuçlar ekranda hiç kullanılmaz. */
+function realResults(results) {
+  return results.filter((result) => !result.is_mock);
+}
+
+function statusCell(result) {
+  const cell = el("td", {}, [
+    el("span", { className: `pill pill--${result.status}` }, [
+      el("span", { className: "pill__dot", attrs: { "aria-hidden": "true" } }),
+      STATUS_LABELS[result.status] || result.status,
+    ]),
+  ]);
+  if (result.status === "failed") {
+    cell.append(
+      el("p", {
+        className: "history__error",
+        text: result.error_message || "Koşu başarısız oldu; backend bir açıklama döndürmedi.",
+      }),
+    );
+  }
+  return cell;
+}
+
 function renderHistory(results) {
-  const sorted = results.slice().sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+  const sorted = realResults(results).sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
   dom.historyEmpty.hidden = sorted.length > 0;
   dom.historyWrap.hidden = sorted.length === 0;
 
@@ -201,12 +252,7 @@ function renderHistory(results) {
         el("td", { text: formatDate(result.started_at) }),
         el("td", { text: METHOD_LABELS[result.method] || result.method }),
         el("td", { text: SPLIT_LABELS[result.split] || result.split }),
-        el("td", {}, [
-          el("span", { className: `pill pill--${result.status}` }, [
-            el("span", { className: "pill__dot", attrs: { "aria-hidden": "true" } }),
-            STATUS_LABELS[result.status] || result.status,
-          ]),
-        ]),
+        statusCell(result),
         el("td", { className: "num", text: result.metrics?.total_cases ?? "—" }),
         el("td", { className: "num", text: formatPercent(result.metrics?.recall_at_5) }),
       ]),
@@ -224,16 +270,8 @@ function showResultsState(state) {
 function schedulePolling(results) {
   clearTimeout(pollTimer);
   pollTimer = null;
-  const hasRunning = results.some((result) => result.status === "running");
-  if (!hasRunning) {
-    pollStartedAt = 0;
-    return;
-  }
-  if (!pollStartedAt) pollStartedAt = Date.now();
-  if (Date.now() - pollStartedAt > POLL_MAX_DURATION_MS) {
-    pollStartedAt = 0;
-    return;
-  }
+  const hasRunning = realResults(results).some((result) => result.status === "running");
+  if (!hasRunning) return;
   pollTimer = setTimeout(() => refreshResults({ silent: true }), POLL_INTERVAL_MS);
 }
 
@@ -280,6 +318,9 @@ function init() {
     resultsLoading: byId("results-loading"),
     resultsError: byId("results-error"),
     resultsEmpty: byId("results-empty"),
+    emptyTitle: byId("results-empty-title"),
+    emptyText: byId("results-empty-text"),
+    emptyNote: byId("results-empty-note"),
     comparisonWrap: byId("comparison-wrap"),
     comparisonHead: byId("comparison-head"),
     comparisonBody: byId("comparison-body"),

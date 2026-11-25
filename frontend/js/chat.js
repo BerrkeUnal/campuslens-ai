@@ -4,7 +4,7 @@
 // Backend her soruyu bağımsız yanıtlar; sohbet akışı yalnızca bu sekmede, bellekte tutulur.
 
 import { askQuestion } from "./api.js";
-import { el, externalLink, formatMs, icon, initStatus, renderError } from "./ui.js";
+import { el, externalLink, formatMs, icon, initMockBanner, initStatus, renderError } from "./ui.js";
 
 const STUDENT_METHOD = "hybrid_rerank";
 const QUESTION_MIN = 3;
@@ -67,16 +67,33 @@ function assistantShell(children, extraClass = "") {
   ]);
 }
 
+// Yanıt uzun sürerse bekleme metni güncellenir (ilk soruda modeller yüklenirken 1 dakikayı aşabilir).
+const PENDING_STEPS = [
+  { afterMs: 0, text: "Belgeler taranıyor ve yanıt hazırlanıyor…" },
+  { afterMs: 15_000, text: "Yanıt hazırlanıyor. İlk soruda sistemin hazırlanması biraz uzun sürebilir…" },
+  { afterMs: 60_000, text: "Hâlâ çalışıyor, lütfen bekleyin. Yanıt birkaç dakika içinde gelecektir…" },
+];
+
 function addPendingMessage() {
+  const label = el("span", { text: PENDING_STEPS[0].text });
   const node = assistantShell([
     el("div", { className: "msg__card msg__card--pending" }, [
       el("span", { className: "dots", attrs: { "aria-hidden": "true" } }, [el("span"), el("span"), el("span")]),
-      el("span", { text: "Belgeler taranıyor ve yanıt hazırlanıyor…" }),
+      label,
     ]),
   ]);
+  node._pendingTimers = PENDING_STEPS.slice(1).map((step) =>
+    setTimeout(() => {
+      label.textContent = step.text;
+    }, step.afterMs),
+  );
   dom.thread.append(node);
   scrollThreadToEnd();
   return node;
+}
+
+function clearPending(node) {
+  (node?._pendingTimers || []).forEach(clearTimeout);
 }
 
 /** Yanıt metnini paragraflara böler; [S1] işaretlerini kaynağa giden düğmelere çevirir. */
@@ -281,6 +298,7 @@ async function ask(question, { addUserBubble = true } = {}) {
     if (token !== conversation) return;
     addErrorMessage(error, question, pending);
   } finally {
+    clearPending(pending);
     if (token === conversation) setChatState("idle");
   }
 }
@@ -372,6 +390,7 @@ function init() {
     sidebarToggle: byId("sidebar-toggle"),
   });
 
+  initMockBanner();
   initStatus(document.querySelector("[data-status]"), { quietWhenOk: true });
 
   dom.form.addEventListener("submit", submitQuestion);

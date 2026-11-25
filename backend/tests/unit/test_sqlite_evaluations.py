@@ -31,14 +31,9 @@ def database(tmp_path: Path) -> SQLiteDatabase:
 async def test_run_and_case_results_persist(database: SQLiteDatabase) -> None:
     await database.initialize()
     repository = SQLiteEvaluationRepository(database)
-    cases = [
-        RetrievalCaseResult("eval-001", 5, 10),
-        RetrievalCaseResult("eval-002", None, 30),
-    ]
+    cases = [RetrievalCaseResult("eval-001", 5, 10), RetrievalCaseResult("eval-002", None, 30)]
     run = await repository.start_run(REQUEST, total_cases=len(cases))
-    await repository.complete_run(
-        run.run_id, RetrievalEvaluation(cases, summarize_retrieval(cases))
-    )
+    await repository.complete_run(run.run_id, RetrievalEvaluation(cases, summarize_retrieval(cases)))
 
     reopened = SQLiteDatabase(f"sqlite:///{database.path.as_posix()}")
     await reopened.initialize()
@@ -63,15 +58,10 @@ async def test_run_and_case_results_persist(database: SQLiteDatabase) -> None:
 
 
 @pytest.mark.asyncio
-async def test_database_error_rolls_back_run_and_cases(
-    database: SQLiteDatabase,
-) -> None:
+async def test_database_error_rolls_back_run_and_cases(database: SQLiteDatabase) -> None:
     await database.initialize()
     repository = SQLiteEvaluationRepository(database)
-    cases = [
-        RetrievalCaseResult("duplicate", 1, 10),
-        RetrievalCaseResult("duplicate", 1, 10),
-    ]
+    cases = [RetrievalCaseResult("duplicate", 1, 10), RetrievalCaseResult("duplicate", 1, 10)]
     run = await repository.start_run(REQUEST, total_cases=len(cases))
 
     with pytest.raises(ServiceUnavailableError):
@@ -95,9 +85,7 @@ class UnusedRunner:
     is_mock = False
 
     async def evaluate(self, *_):
-        raise AssertionError(
-            "Retrieval should not start with an empty or invalid data set."
-        )
+        raise AssertionError("Retrieval should not start with an empty or invalid data set.")
 
 
 @pytest.mark.asyncio
@@ -111,11 +99,9 @@ async def test_service_records_dataset_errors(
         path = tmp_path / "bad.jsonl"
         path.write_text("{", encoding="utf-8")
         options["cases_path"] = path
-    service = SQLiteEvaluationService(
-        SQLiteEvaluationRepository(database), UnusedRunner(), **options
-    )
+    service = SQLiteEvaluationService(SQLiteEvaluationRepository(database), UnusedRunner, **options)
     run = await service.run_evaluation(
-        EvaluationRunRequest(method=RetrievalMethod.DENSE, split=EvaluationSplit.TEST)
+        EvaluationRunRequest(method=RetrievalMethod.DENSE, split=EvaluationSplit.VALIDATION)
     )
     assert run.status is EvaluationStatus.FAILED
     result = await service.get_result(run.run_id)
@@ -133,18 +119,87 @@ class MockRunner(UnusedRunner):
 @pytest.mark.asyncio
 async def test_service_does_not_persist_mock_metrics(database: SQLiteDatabase) -> None:
     await database.initialize()
-    service = SQLiteEvaluationService(
-        SQLiteEvaluationRepository(database), MockRunner()
+    service = SQLiteEvaluationService(SQLiteEvaluationRepository(database), MockRunner)
+    run = await service.run_evaluation(REQUEST)
+    assert run.status == EvaluationStatus.FAILED
+    result = await service.get_result(run.run_id)
+    assert result is not None and result.metrics is None
+    assert await SQLiteEvaluationRepository(database).list_case_results(run.run_id) == []
+
+
+@pytest.mark.asyncio
+async def test_unanswerable_results_are_saved_and_legacy_mock_rows_are_hidden(
+    database: SQLiteDatabase,
+) -> None:
+    await database.initialize()
+    repository = SQLiteEvaluationRepository(database)
+    cases = [
+        RetrievalCaseResult("answerable", 1, 10),
+        RetrievalCaseResult("abstained", None, 15, True, "Kaynaklarda bilgi yok."),
+        RetrievalCaseResult("answered", None, 20, False, "Unsupported answer."),
+        RetrievalCaseResult("unmeasured", None, 25, answer_error="Unavailable"),
+    ]
+    run = await repository.start_run(REQUEST, total_cases=len(cases))
+    await repository.complete_run(run.run_id, RetrievalEvaluation(cases, summarize_retrieval(cases)))
+    hidden = await repository.start_run(REQUEST, total_cases=0)
+    async with database.connect() as connection:
+        await connection.execute(
+            "UPDATE evaluation_runs SET is_mock = 1 WHERE run_id = ?", (str(hidden.run_id),)
+        )
+        await connection.commit()
+
+    result, = await repository.list_results()
+    assert result.metrics is not None
+    assert result.metrics.recall_at_5 == 1
+    assert result.metrics.abstention_accuracy == 0.5
+    assert result.metrics.abstention_total == 3
+    assert result.metrics.abstention_evaluated == 2
+    assert await repository.list_case_results(run.run_id) == cases
+    assert await repository.get_result(hidden.run_id) is None
+
+
+def test_create_evaluation_runner_wires_production_components(
+    monkeypatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from backend.app.services import sqlite_evaluation_service as module
+
+    store = Mock()
+    retriever = Mock()
+    reranker = Mock()
+    reranked_search = Mock()
+    pipeline = Mock()
+    runner = Mock()
+
+    retriever_constructor = Mock(return_value=retriever)
+    reranker_provider = Mock(return_value=reranker)
+    hybrid_constructor = Mock(return_value=reranked_search)
+    pipeline_constructor = Mock(return_value=pipeline)
+    runner_constructor = Mock(return_value=runner)
+
+    monkeypatch.setattr(module, "Retriever", retriever_constructor)
+    monkeypatch.setattr(module, "get_reranker", reranker_provider)
+    monkeypatch.setattr(module, "HybridRerankSearch", hybrid_constructor)
+    monkeypatch.setattr(module, "RAGPipeline", pipeline_constructor)
+    monkeypatch.setattr(
+        module, "RetrievalEvaluationRunner", runner_constructor
     )
-    with pytest.raises(ValueError, match="Sahte"):
-        await service.run_evaluation(REQUEST)
-    assert (await service.list_results()).total == 0
 
+    result = module.create_evaluation_runner(store)
 
-def test_hybrid_rerank_dependency_returns_real_adapter() -> None:
-    from backend.app.rag.hybrid_rerank import search_hybrid_rerank
-    from backend.app.services.sqlite_evaluation_service import (
-        get_hybrid_rerank_search,
+    assert result is runner
+
+    retriever_constructor.assert_called_once_with(store)
+    reranker_provider.assert_called_once_with()
+    hybrid_constructor.assert_called_once_with(retriever, reranker)
+    pipeline_constructor.assert_called_once_with(
+        retriever, reranked_search
     )
 
-    assert get_hybrid_rerank_search() is search_hybrid_rerank
+    runner_constructor.assert_called_once_with(
+        retriever,
+        reranked_search.search,
+        is_mock=False,
+        answer_with_context=pipeline.answer_with_context,
+    )

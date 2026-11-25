@@ -3,7 +3,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StrictBool, StringConstraints, ValidationError
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from backend.app.schemas.evaluations import EvaluationSplit
 
@@ -25,15 +32,25 @@ class EvaluationCase(BaseModel):
     question: NonEmptyText
     answerable: StrictBool
     gold_answer: NonEmptyText
-    gold_document_id: NonEmptyText
-    gold_pages: list[PageNumber] = Field(min_length=1)
+    gold_document_id: NonEmptyText | None
+    gold_source_url: NonEmptyText | None = None
+    gold_pages: list[PageNumber]
     topic: NonEmptyText
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> "EvaluationCase":
+        if self.answerable:
+            if not self.gold_document_id or not self.gold_pages:
+                raise ValueError("Cevaplanabilir soru için gold_document_id ve gold_pages gerekli.")
+        elif self.gold_document_id or self.gold_source_url or self.gold_pages:
+            raise ValueError("Cevapsız soru için altın belge, URL ve sayfa bulunamaz.")
+        return self
 
 
 @dataclass(frozen=True)
 class ResolvedEvaluationCase:
     case: EvaluationCase
-    source_url: str
+    source_url: str | None
 
 
 def load_catalog(path: Path) -> dict[str, str]:
@@ -79,14 +96,17 @@ def load_evaluation_cases(
         try:
             case = EvaluationCase.model_validate(raw_case)
         except ValidationError as exc:
-            fields = ", ".join(".".join(map(str, error["loc"])) or "satır" for error in exc.errors())
+            fields = ", ".join(".".join(map(str, error["loc"])) or error["msg"] for error in exc.errors())
             raise EvaluationDataError(f"{location}: geçersiz alanlar: {fields}") from exc
         if case.case_id in seen:
             raise EvaluationDataError(f"{location}: tekrarlanan case_id: {case.case_id}")
-        if case.gold_document_id not in urls:
+        source_url = urls.get(case.gold_document_id) if case.gold_document_id else None
+        if case.answerable and source_url is None:
             raise EvaluationDataError(
                 f"{location}: gold_document_id katalogda bulunamadı: {case.gold_document_id}"
             )
+        if case.gold_source_url is not None and case.gold_source_url != source_url:
+            raise EvaluationDataError(f"{location}: gold_source_url katalogla eşleşmiyor")
         seen.add(case.case_id)
-        results.append(ResolvedEvaluationCase(case, urls[case.gold_document_id]))
+        results.append(ResolvedEvaluationCase(case, source_url))
     return results
