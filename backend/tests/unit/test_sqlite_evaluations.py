@@ -31,9 +31,14 @@ def database(tmp_path: Path) -> SQLiteDatabase:
 async def test_run_and_case_results_persist(database: SQLiteDatabase) -> None:
     await database.initialize()
     repository = SQLiteEvaluationRepository(database)
-    cases = [RetrievalCaseResult("eval-001", 5, 10), RetrievalCaseResult("eval-002", None, 30)]
+    cases = [
+        RetrievalCaseResult("eval-001", 5, 10),
+        RetrievalCaseResult("eval-002", None, 30),
+    ]
     run = await repository.start_run(REQUEST, total_cases=len(cases))
-    await repository.complete_run(run.run_id, RetrievalEvaluation(cases, summarize_retrieval(cases)))
+    await repository.complete_run(
+        run.run_id, RetrievalEvaluation(cases, summarize_retrieval(cases))
+    )
 
     reopened = SQLiteDatabase(f"sqlite:///{database.path.as_posix()}")
     await reopened.initialize()
@@ -58,10 +63,15 @@ async def test_run_and_case_results_persist(database: SQLiteDatabase) -> None:
 
 
 @pytest.mark.asyncio
-async def test_database_error_rolls_back_run_and_cases(database: SQLiteDatabase) -> None:
+async def test_database_error_rolls_back_run_and_cases(
+    database: SQLiteDatabase,
+) -> None:
     await database.initialize()
     repository = SQLiteEvaluationRepository(database)
-    cases = [RetrievalCaseResult("duplicate", 1, 10), RetrievalCaseResult("duplicate", 1, 10)]
+    cases = [
+        RetrievalCaseResult("duplicate", 1, 10),
+        RetrievalCaseResult("duplicate", 1, 10),
+    ]
     run = await repository.start_run(REQUEST, total_cases=len(cases))
 
     with pytest.raises(ServiceUnavailableError):
@@ -85,7 +95,9 @@ class UnusedRunner:
     is_mock = False
 
     async def evaluate(self, *_):
-        raise AssertionError("Retrieval should not start with an empty or invalid data set.")
+        raise AssertionError(
+            "Retrieval should not start with an empty or invalid data set."
+        )
 
 
 @pytest.mark.asyncio
@@ -99,7 +111,9 @@ async def test_service_records_dataset_errors(
         path = tmp_path / "bad.jsonl"
         path.write_text("{", encoding="utf-8")
         options["cases_path"] = path
-    service = SQLiteEvaluationService(SQLiteEvaluationRepository(database), UnusedRunner(), **options)
+    service = SQLiteEvaluationService(
+        SQLiteEvaluationRepository(database), UnusedRunner(), **options
+    )
     run = await service.run_evaluation(
         EvaluationRunRequest(method=RetrievalMethod.DENSE, split=EvaluationSplit.TEST)
     )
@@ -119,7 +133,18 @@ class MockRunner(UnusedRunner):
 @pytest.mark.asyncio
 async def test_service_does_not_persist_mock_metrics(database: SQLiteDatabase) -> None:
     await database.initialize()
-    service = SQLiteEvaluationService(SQLiteEvaluationRepository(database), MockRunner())
+    service = SQLiteEvaluationService(
+        SQLiteEvaluationRepository(database), MockRunner()
+    )
     with pytest.raises(ValueError, match="Sahte"):
         await service.run_evaluation(REQUEST)
     assert (await service.list_results()).total == 0
+
+
+def test_hybrid_rerank_dependency_returns_real_adapter() -> None:
+    from backend.app.rag.hybrid_rerank import search_hybrid_rerank
+    from backend.app.services.sqlite_evaluation_service import (
+        get_hybrid_rerank_search,
+    )
+
+    assert get_hybrid_rerank_search() is search_hybrid_rerank

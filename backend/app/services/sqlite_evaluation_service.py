@@ -9,6 +9,7 @@ from backend.app.core.exceptions import ApplicationError
 from backend.app.db.database import SQLiteDatabase, get_database
 from backend.app.db.evaluation_repository import SQLiteEvaluationRepository
 from backend.app.ports.vector_store import VectorStore
+from backend.app.rag.hybrid_rerank import search_hybrid_rerank
 from backend.app.rag.qdrant_store import get_vector_store
 from backend.app.schemas.evaluations import (
     EvaluationResultListResponse,
@@ -41,7 +42,9 @@ class SQLiteEvaluationService:
         self._cases_path = cases_path
         self._catalog_path = catalog_path
 
-    async def run_evaluation(self, request: EvaluationRunRequest) -> EvaluationRunResponse:
+    async def run_evaluation(
+        self, request: EvaluationRunRequest
+    ) -> EvaluationRunResponse:
         if self._runner.is_mock:
             raise ValueError("Sahte arama sonuçları kalıcı değerlendirmeye yazılamaz.")
 
@@ -59,10 +62,14 @@ class SQLiteEvaluationService:
         run = await self._repository.start_run(request, total_cases=len(cases))
         try:
             if not cases:
-                raise EvaluationDataError(f"{request.split.value} bölümünde test sorusu yok.")
+                raise EvaluationDataError(
+                    f"{request.split.value} bölümünde test sorusu yok."
+                )
             evaluation = await self._runner.evaluate(request.method, cases)
             await self._repository.complete_run(run.run_id, evaluation)
-        except Exception as exc:  # Save failed runs, including errors from injected retrieval.
+        except (
+            Exception
+        ) as exc:  # Save failed runs, including errors from injected retrieval.
             logger.exception("Evaluation run %s failed", run.run_id)
             message = (
                 str(exc)
@@ -82,9 +89,9 @@ class SQLiteEvaluationService:
         return await self._repository.get_result(run_id)
 
 
-def get_hybrid_rerank_search() -> Search | None:
-    """Dependency override for the team's reranked retrieval adapter."""
-    return None
+def get_hybrid_rerank_search() -> Search:
+    """Return the real hybrid reranking adapter."""
+    return search_hybrid_rerank
 
 
 def get_sqlite_evaluation_service(

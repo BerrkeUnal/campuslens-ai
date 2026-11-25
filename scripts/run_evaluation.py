@@ -15,7 +15,10 @@ from backend.app.schemas.evaluations import (
     EvaluationStatus,
 )
 from backend.app.schemas.retrieval import RetrievalMethod
-from backend.app.services.sqlite_evaluation_service import get_sqlite_evaluation_service
+from backend.app.services.sqlite_evaluation_service import (
+    get_hybrid_rerank_search,
+    get_sqlite_evaluation_service,
+)
 
 
 async def run(method: RetrievalMethod, split: EvaluationSplit) -> int:
@@ -23,15 +26,25 @@ async def run(method: RetrievalMethod, split: EvaluationSplit) -> int:
     await database.initialize()
     store = get_vector_store()
     try:
-        service = get_sqlite_evaluation_service(database, store, hybrid_rerank=None)
-        run_result = await service.run_evaluation(EvaluationRunRequest(method=method, split=split))
+        service = get_sqlite_evaluation_service(
+            database,
+            store,
+            hybrid_rerank=get_hybrid_rerank_search(),
+        )
+        run_result = await service.run_evaluation(
+            EvaluationRunRequest(method=method, split=split)
+        )
         result = await service.get_result(run_result.run_id)
         assert result is not None
         repository = SQLiteEvaluationRepository(database)
         cases = await repository.list_case_results(run_result.run_id)
         output = result.model_dump(mode="json")
         output["cases"] = [
-            {**asdict(case), "source_hit": case.source_hit, "reciprocal_rank": case.reciprocal_rank}
+            {
+                **asdict(case),
+                "source_hit": case.source_hit,
+                "reciprocal_rank": case.reciprocal_rank,
+            }
             for case in cases
         ]
         print(json.dumps(output, ensure_ascii=True, indent=2))
@@ -42,9 +55,13 @@ async def run(method: RetrievalMethod, split: EvaluationSplit) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--method", type=RetrievalMethod, choices=list(RetrievalMethod), required=True)
     parser.add_argument(
-        "--split", type=EvaluationSplit, choices=list(EvaluationSplit),
+        "--method", type=RetrievalMethod, choices=list(RetrievalMethod), required=True
+    )
+    parser.add_argument(
+        "--split",
+        type=EvaluationSplit,
+        choices=list(EvaluationSplit),
         default=EvaluationSplit.VALIDATION,
     )
     args = parser.parse_args()
