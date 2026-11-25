@@ -5,7 +5,7 @@
 import { MOCK_MODE } from "./api.js";
 import { AuthError, loginAdmin, redirectIfAuthenticated, resolveNextPage } from "./auth.js";
 import { DEMO_ADMIN_CREDENTIALS } from "./mock-data.js";
-import { icon, renderError, setButtonBusy } from "./ui.js";
+import { icon, initMockBanner, renderError, setButtonBusy } from "./ui.js";
 
 const dom = {};
 let submitting = false;
@@ -86,6 +86,8 @@ function init() {
     submit: byId("login-submit"),
     error: byId("login-error"),
   });
+
+  initMockBanner();
 
   // Demo bilgileri yalnızca mock modu açıkken gösterilir.
   if (MOCK_MODE) {
