@@ -1,100 +1,211 @@
 # CampusLens AI
 
-Üniversite yönetmelik ve yönergelerinden **kaynak gösteren** cevaplar üreten RAG (Retrieval-Augmented Generation) sistemi.
-Öğrenci soruyu sorar; sistem ilgili belge parçalarını bulur (BM25, dense, hybrid, hybrid + rerank), cevabı yerel bir dil modeliyle
-üretir ve her cevabı belge adı, sayfa numarası ve alıntıyla birlikte gösterir. Belgelerde yeterli bilgi yoksa cevap uydurmak yerine bunu belirtir.
+CampusLens AI, üniversite yönetmelik ve yönergelerinden **kaynak gösteren Türkçe cevaplar** üreten yerel bir RAG (Retrieval-Augmented Generation) uygulamasıdır.
+
+Öğrenci sorusunu yazar; sistem ilgili belge parçalarını BM25, dense, hybrid veya hybrid + rerank yöntemlerinden biriyle bulur, cevabı yerel bir dil modeliyle üretir ve kullanılan belgeyi, PDF sayfasını ve ilgili metin parçasını gösterir. Belgelerde yeterli bilgi yoksa cevap uydurmak yerine bunu açıkça belirtir.
 
 | Katman | Teknoloji |
 | --- | --- |
-| Backend | Python, FastAPI, SQLite |
-| Vektör arama | Qdrant (yerel klasör modu), `intfloat/multilingual-e5-small`, BM25, `BAAI/bge-reranker-v2-m3` |
-| Dil modeli | Ollama (`qwen3:8b`) |
-| Frontend | HTML, CSS, Vanilla JavaScript (build adımı yok) |
+| Backend | Python 3.11+, FastAPI, SQLite |
+| PDF işleme | PyMuPDF, metin temizleme ve token tabanlı chunking |
+| Vektör arama | Qdrant yerel klasör modu, `intfloat/multilingual-e5-small`, BM25 |
+| Yeniden sıralama | `BAAI/bge-reranker-v2-m3` |
+| Dil modeli | Ollama, `qwen3:8b` |
+| Frontend | HTML, CSS, Vanilla JavaScript |
+
+## Sistem akışı
+
+1. Admin, resmî üniversite PDF belgesini başlığı ve kaynak bağlantısıyla yükler.
+2. Backend PDF metnini çıkarır, temizler ve en fazla 400 tokenlık parçalara böler.
+3. Belge bilgileri SQLite'a, aranabilir belge parçaları Qdrant'a kaydedilir.
+4. Öğrenci sorusu BM25, dense, hybrid veya hybrid + rerank yöntemiyle aranır.
+5. En ilgili kaynak parçaları yerel Ollama modeline gönderilir.
+6. Model yalnızca verilen kaynaklara dayanarak Türkçe cevap ve kaynak kimlikleri üretir.
+7. Kaynak doğrulayıcı, cevapta kullanılan kaynakların gerçekten getirilen parçalar arasında olduğunu kontrol eder.
+8. Yeterli bilgi bulunmazsa sistem `insufficient_context=true` döndürür ve cevap uydurmaz.
 
 ## Gereksinimler
 
-- **Python 3.12** veya üstü
-- **Ollama** (https://ollama.com/download) ve model: `ollama pull qwen3:8b`
-- Embedding, sparse retrieval ve reranker modelleri uygulama başlatılmadan önce `python -m scripts.prepare_models` komutuyla hazırlanmalıdır. Çalışma sırasında Hugging Face modelleri yerel cache üzerinden yüklenir.
+- **Python 3.11** veya üzeri
+- **Ollama**: <https://ollama.com/download>
+- Git
+- İlk model indirmeleri için internet bağlantısı
+- Önerilen bellek: `qwen3:8b` ve reranker için en az 16 GB RAM
 
-## Kurulum (bir kez)
+Node.js yalnızca isteğe bağlı frontend sözdizimi kontrolü için gereklidir. Uygulamayı çalıştırmak için frontend build adımı yoktur.
 
-Proje kökünde:
+## Kurulum
+
+Proje kökünde sanal ortam oluşturun ve bağımlılıkları yükleyin:
 
 ```bash
 python -m venv .venv
-# Windows (PowerShell):  .venv\Scripts\Activate.ps1
-# macOS / Linux:         source .venv/bin/activate
+```
+
+Sanal ortamı etkinleştirin:
+
+```bash
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+Bağımlılıkları ve yerel dil modelini hazırlayın:
+
+```bash
 pip install -r requirements.txt
 ollama pull qwen3:8b
 python -m scripts.prepare_models
 ```
 
-Ayarlar `.env` dosyasından okunur. Dosya yoksa çalıştırma komutu `.env.example` dosyasını kopyalayarak oluşturur.
+`scripts.prepare_models` embedding, sparse retrieval, reranker ve Ollama modelinin kullanılabilir olduğunu kontrol eder. İlk çalıştırma internet hızına göre uzun sürebilir. Normal çalışma sırasında Hugging Face modelleri yerel cache üzerinden yüklenir.
 
-## Çalıştırma (tek komut)
+Ayarlar `.env` dosyasından okunur. Dosya yoksa `scripts/run_dev.py`, `.env.example` dosyasını kopyalayarak oluşturur. Yerel ayarlar ve API anahtarları Git deposuna eklenmez.
+
+## Belgelerin hazırlanması
+
+Projede kullanılan dokuz resmî PDF, Git deposuna eklenmez. PDF'leri yerel olarak aşağıdaki klasöre koyun:
+
+```text
+data/source_pdfs/
+```
+
+Dosya adları `resources/istinye_documents.json` içindeki `file_name` alanlarıyla eşleşmelidir.
+
+Backend kapalıyken dokuz belgeyi tek komutla indeksleyin:
+
+```bash
+python -m scripts.index_documents \
+  --catalog resources/istinye_documents.json \
+  --pdf-dir data/source_pdfs
+```
+
+Bu işlem:
+
+- PDF'yi doğrular ve metni çıkarır.
+- Metni temizleyip parçalara böler.
+- Belge kaydını SQLite'a yazar.
+- PDF'yi `data/documents/` altında saklar.
+- Chunk'ları Qdrant'a indeksler.
+
+Aynı kaynak URL'si daha önce indekslendiyse belge atlanır. Yeniden indekslemek için komuta `--replace` ekleyin.
+
+> Embedded Qdrant klasörünü aynı anda yalnızca bir süreç açabilir. CLI ile indeksleme veya evaluation çalıştırmadan önce backend'i kapatın.
+
+Tek bir PDF de admin panelinden veya CLI ile yüklenebilir:
+
+```bash
+python -m scripts.index_documents \
+  --pdf yonetmelik.pdf \
+  --title "Ön Lisans ve Lisans Eğitim-Öğretim Yönetmeliği" \
+  --source-url "https://www.universite.edu.tr/resmi-belge.pdf"
+```
+
+Kullanılan belgelerin başlıkları, dosya adları ve resmî kaynak bağlantıları `resources/istinye_documents.json` dosyasındadır.
+
+## Çalıştırma
+
+Backend ve frontend'i birlikte başlatmak için:
 
 ```bash
 python scripts/run_dev.py
 ```
 
-Bu komut backend'i (`http://127.0.0.1:8000`) ve frontend'i (`http://127.0.0.1:5500`) birlikte başlatır, öğrenci ekranını tarayıcıda açar.
-Ctrl+C ikisini birlikte durdurur. Ollama çalışmıyorsa veya model indirilmemişse başlangıçta uyarı verir.
+Bu komut:
 
-| Adres | İçerik |
+- Backend'i `http://127.0.0.1:8000` adresinde başlatır.
+- Frontend'i `http://127.0.0.1:5500` adresinde başlatır.
+- Öğrenci ekranını tarayıcıda açar.
+- Ollama ve model durumuyla ilgili başlangıç kontrollerini yapar.
+- `Ctrl+C` ile iki süreci birlikte durdurur.
+
+| Adres | Açıklama |
 | --- | --- |
-| http://127.0.0.1:5500/index.html | Öğrenci sohbet ekranı |
-| http://127.0.0.1:5500/admin-login.html | Admin girişi (belge yönetimi ve değerlendirme) |
-| http://127.0.0.1:8000/docs | API belgeleri (Swagger) |
+| <http://127.0.0.1:5500/index.html> | Öğrenci soru-cevap ekranı |
+| <http://127.0.0.1:5500/admin-login.html> | Demo admin girişi |
+| <http://127.0.0.1:8000/docs> | Swagger API belgeleri |
+| <http://127.0.0.1:8000/api/health> | Backend, SQLite ve Qdrant sağlık durumu |
 
-Seçenekler: `--no-browser` (tarayıcıyı açma), `--reload` (Python dosyası değişince backend'i yeniden başlat).
-
-Portlar sabittir: frontend API'yi `http://127.0.0.1:8000/api` adresinde arar, backend CORS ayarı yalnızca `http://127.0.0.1:5500` adresine izin verir.
-Tarayıcıda `localhost` yerine `127.0.0.1` kullanın.
-
-<details>
-<summary>İki ayrı terminalle elle çalıştırma</summary>
+İsteğe bağlı çalıştırma seçenekleri:
 
 ```bash
-# Terminal 1 — backend
+python scripts/run_dev.py --no-browser
+python scripts/run_dev.py --reload
+```
+
+Frontend backend'e `http://127.0.0.1:8000/api` üzerinden bağlanır. CORS ayarı `http://127.0.0.1:5500` adresine göre yapılandırılmıştır; tarayıcıda `localhost` yerine `127.0.0.1` kullanın.
+
+<details>
+<summary>Backend ve frontend'i ayrı terminallerde çalıştırma</summary>
+
+```bash
+# Terminal 1
 uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 
-# Terminal 2 — frontend
+# Terminal 2
 python -m http.server 5500 --bind 127.0.0.1 --directory frontend
 ```
 
 </details>
 
-## Belgeleri yükleme
+## Admin paneli
 
-En kolay yol admin ekranıdır: **Admin girişi → Belgeler → PDF yükle**. Belge yükleme isteği içinde metne çevrilip indekslenir;
-büyük belgelerde birkaç dakika sürebilir. Admin girişi şimdilik demo amaçlıdır; demo bilgileri
-`frontend/js/mock-data.js` dosyasında `DEMO_ADMIN_CREDENTIALS` olarak tanımlıdır (ayrıntı: [`frontend/README.md`](frontend/README.md)).
+Admin paneli aşağıdaki işlemleri sağlar:
 
-Komut satırından da yapılabilir (backend kapalıyken; yerel Qdrant klasörünü aynı anda tek süreç açabilir).
-Bu komutlar admin yüklemesiyle aynı yolu kullanır: belge SQLite'a kaydedilir, PDF `data/documents/` altına konur ve
-Qdrant'a indekslenir; yani admin ekranında görünür ve oradan silinebilir.
+- PDF yükleme
+- Yüklenen belgeleri ve indeksleme durumlarını görüntüleme
+- Belge silme
+- Gerçek retrieval değerlendirmesi başlatma
+- Önceki evaluation sonuçlarını görüntüleme
 
-```bash
-# Tek PDF
-python scripts/index_documents.py --pdf yonetmelik.pdf --title "Ön Lisans ve Lisans Eğitim-Öğretim Yönetmeliği" --source-url "https://..."
+Demo giriş bilgileri:
 
-# Katalogdaki PDF'lerin hepsi (başlık ve kaynak URL katalogdan alınır)
-python scripts/index_documents.py --catalog resources/istinye_documents.json --pdf-dir <pdf-klasörü>
+```text
+Kullanıcı adı: admin
+Şifre: campuslens-demo
 ```
 
-Aynı kaynak URL'si zaten indekslenmişse belge atlanır; yeniden indekslemek için `--replace` ekleyin.
-`--input data/processed/<belge-id>/chunks.json` (`python -m backend.scripts.process_pdf` çıktısı) chunk'ları doğrudan
-Qdrant'a yazar; yalnızca test ve hata ayıklama içindir, bu belgeler admin ekranında görünmez.
+Admin girişi yalnızca yerel sunum akışını göstermek içindir. Gerçek backend authentication veya kullanıcı yetkilendirmesi sağlamaz.
 
-Kullanılan İstinye Üniversitesi belgelerinin listesi ve kaynak adresleri: `resources/istinye_documents.json`.
+## API endpointleri
+
+| Yöntem | Endpoint | Açıklama |
+| --- | --- | --- |
+| `GET` | `/api/health` | Backend, SQLite ve Qdrant durumunu döndürür. |
+| `POST` | `/api/documents/upload` | PDF'yi kaydeder, işler ve indeksler. |
+| `GET` | `/api/documents` | Belge listesini döndürür. |
+| `DELETE` | `/api/documents/{document_id}` | Belgeyi, dosyasını ve vektör kayıtlarını siler. |
+| `POST` | `/api/questions/ask` | Soruyu seçilen retrieval yöntemiyle yanıtlar. |
+| `POST` | `/api/evaluations/run` | Gerçek evaluation koşusu başlatır. |
+| `GET` | `/api/evaluations/results` | SQLite'a kaydedilmiş koşuları döndürür. |
+
+Tüm hata cevapları ortak JSON yapısını, Türkçe kullanıcı mesajını ve takip için `request_id` alanını kullanır.
+
+## Arama yöntemleri
+
+| Yöntem | Açıklama |
+| --- | --- |
+| `bm25` | Anahtar kelime ve terim eşleşmesine dayalı sparse retrieval |
+| `dense` | Çok dilli embedding benzerliğine dayalı dense retrieval |
+| `hybrid` | BM25 ve dense sonuçlarının birleştirilmesi |
+| `hybrid_rerank` | Hybrid adayların BGE cross-encoder ile yeniden sıralanması |
+
+Öğrenci ekranı varsayılan olarak `hybrid_rerank` kullanır.
 
 ## Değerlendirme
 
-Önce katalogdaki dokuz PDF’yi aynı kaynak URL’leriyle işleyip Qdrant’a indeksleyin
-(`python scripts/index_documents.py --catalog resources/istinye_documents.json --pdf-dir <pdf-klasörü>`). Cevapsız soruların değerlendirilmesi için seçilen LLM sağlayıcısı çalışıyor olmalıdır. Admin ekranından bir yöntem veya tüm yöntemler seçilebilir. API koşuyu arka planda işler ve sonuçları SQLite’tan sunar. Yeni bir veritabanında sonuç listesi boştur.
+Evaluation veri seti `data/evaluation/cases.jsonl` dosyasındadır:
 
-Aynı 50 soruluk test setini terminalden çalıştırmak için:
+- 42 cevaplanabilir soru
+- 8 kaynaklarda cevabı bulunmayan soru
+- Toplam 50 soru
+- 9 resmî PDF'ye dağıtılmış test örnekleri
+
+Admin ekranından tek bir yöntem veya dört yöntemin tamamı çalıştırılabilir. Koşular arka planda yürütülür ve sonuçlar SQLite'a kaydedilir. Yeni bir veritabanında sonuç ekranının boş olması normaldir.
+
+Terminalden çalıştırmak için backend'i kapatın ve aşağıdaki komutlardan birini kullanın:
 
 ```bash
 python -m scripts.run_evaluation --method bm25 --split test
@@ -103,48 +214,18 @@ python -m scripts.run_evaluation --method hybrid --split test
 python -m scripts.run_evaluation --method hybrid_rerank --split test
 ```
 
-- **Recall@5 ve MRR@5** 42 cevaplanabilir soruda hesaplanır. Doğru kaynak için katalogdaki URL ve bir kabul edilen PDF sayfası eşleşmelidir.
-- **Cevapsız soru doğruluğu** sekiz soru için gerçek RAG dönüşündeki `insufficient_context` alanıyla hesaplanır. URL ve doğru sayfa alanları bu sorularda boştur. Model hatası oluşursa hata soru bazında saklanır. Doğruluk yalnızca ölçülebilen sorulardan hesaplanır ve arayüz kaç sorunun ölçülebildiğini gösterir.
-- **Ortalama arama süresi** 50 sorgunun retrieval süresini kullanır. Hybrid + Rerank süresine yeniden sıralama dahildir. LLM cevap üretme süresi bu ölçümün dışındadır.
+Gerçek olarak hesaplanan metrikler:
 
-## Testler
+- **Recall@5:** Doğru belge ve kabul edilen PDF sayfasının ilk beş sonuçta bulunma oranı.
+- **MRR@5:** Doğru kaynağın sonuç sırasını dikkate alan reciprocal-rank ortalaması.
+- **Cevapsız soru doğruluğu:** Sekiz cevapsız soruda `insufficient_context=true` döndürme başarısı.
+- **Ortalama arama süresi:** Retrieval süresi; hybrid + rerank için yeniden sıralama süresi dahildir.
 
-```bash
-python -m pytest
-ruff check .
-```
+`answer_correctness`, `hallucination_rate` ve `total_cost_usd` alanları API sözleşmesinde gelecekteki geliştirmeler için bulunur ancak mevcut sürümde otomatik olarak hesaplanmaz. Rapor ve sunumda yalnızca gerçekten ölçülen metrikler kullanılmalıdır.
 
-## Mock modu (yalnızca geliştirme)
+Evaluation özellikle CPU üzerinde uzun sürebilir. Sunumdan önce koşuları tamamlayıp sonuçları SQLite'a kaydetmek önerilir.
 
-Teslim edilen sürümde **kapalıdır**. Frontend'i backend olmadan denemek için adrese `?mock=1` eklenebilir; bu durumda her sayfanın
-üstünde "Geliştirme modu (mock)" uyarısı görünür ve ekrandaki veriler örnek veridir. Ayar yalnızca o sekme için geçerlidir;
-`?mock=0` veya uyarıdaki **Mock modu kapat** düğmesiyle kapanır.
-
-## Sorun giderme
-
-| Durum | Çözüm |
-| --- | --- |
-| "8000 / 5500 portu kullanımda" | Açık kalan uvicorn, Live Server veya `http.server` penceresini kapatın. |
-| "Sunucuya bağlanılamadı" | Backend çalışmıyor; `python scripts/run_dev.py` çıktısındaki hatayı kontrol edin. |
-| İlk soru çok uzun sürüyor | Model hazırlığının tamamlandığını ve başlangıç warm-up işleminin bittiğini kontrol edin. |
-| Sorular yanıtlanmıyor | Ollama açık mı ve `ollama list` çıktısında `qwen3:8b` var mı kontrol edin. |
-| Admin ekranında "İndeks yok" | Henüz belge indekslenmedi; Belgeler sayfasından PDF yükleyin. |
-| PowerShell `Activate.ps1` çalışmıyor | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` komutunu bir kez çalıştırın. |
-
-## Proje yapısı
-
-```
-backend/app/       FastAPI uygulaması (api, rag, services, db, schemas)
-backend/scripts/   PDF işleme komutu
-backend/tests/     Backend testleri
-frontend/          Öğrenci ve admin arayüzü (ayrıntı: frontend/README.md)
-scripts/           run_dev.py (tek komutla çalıştırma), index_documents.py, run_evaluation.py
-resources/         Belge kataloğu
-data/              Yerel veritabanı, Qdrant klasörü ve değerlendirme soruları (git'e girmez, cases.jsonl hariç)
-```
-
-
-## Model hazırlığı ve GPU desteği
+## Model hazırlığı ve readiness
 
 Model dosyalarını uygulamayı başlatmadan önce hazırlayın:
 
@@ -152,26 +233,7 @@ Model dosyalarını uygulamayı başlatmadan önce hazırlayın:
 python -m scripts.prepare_models
 ```
 
-İlk hazırlık internet bağlantısı gerektirebilir. Normal çalışma
-sırasında embedding ve reranker modelleri yerel cache üzerinden
-yüklenir; eksik model dosyaları otomatik indirilmez.
-
-### Model readiness
-
-- `MODEL_WARMUP_ENABLED=true`: varsayılan başlangıç davranışı.
-- Modeller arka planda embedding, reranker ve Ollama sırasıyla hazırlanır.
-- Hazırlık tamamlanmadan gelen soru istekleri HTTP 503 ve
-  `model_preparing` hata koduyla reddedilir.
-- Hazırlık başarısız olursa soru istekleri HTTP 503 ve
-  `model_unavailable` hata koduyla reddedilir.
-- `/api/health` mevcut backend, database ve Qdrant sağlık
-  sözleşmesini korur; model readiness göstergesi değildir.
-- `MODEL_WARMUP_ENABLED=false` warm-up mekanizmasını devre dışı bırakır.
-  Bu durumda modeller gerektiğinde yüklenebilir.
-
-### Reranker cihaz seçimi
-
-`.env` dosyasındaki varsayılan ayarlar:
+Varsayılan `.env` ayarları:
 
 ```dotenv
 RERANKER_DEVICE=cpu
@@ -181,31 +243,116 @@ OLLAMA_MODEL=qwen3:8b
 OLLAMA_KEEP_ALIVE=30m
 ```
 
-NVIDIA GPU ve CUDA destekli PyTorch bulunan sistemlerde:
+Uygulama başlatıldığında modeller arka planda hazırlanır:
+
+- Hazırlık sürerken soru ve evaluation istekleri HTTP 503 ve `model_preparing` kodu alır.
+- Hazırlık başarısız olursa HTTP 503 ve `model_unavailable` kodu döner.
+- `/api/health` backend, SQLite ve Qdrant sağlığını gösterir; model readiness endpointi değildir.
+- `MODEL_WARMUP_ENABLED=false` arka plan warm-up işlemini kapatır.
+
+NVIDIA GPU ve CUDA uyumlu PyTorch bulunan sistemlerde reranker için:
 
 ```dotenv
 RERANKER_DEVICE=cuda:0
 ```
 
-CUDA destekli PyTorch kurulumu kullanılan işletim sistemi, Python
-sürümü ve GPU sürücüsüne uygun olmalıdır. CPU kurulumu taşınabilir
-varsayılan olarak korunmuştur.
+CUDA açıkça seçildiğinde GPU kullanılamazsa sistem sessizce CPU'ya geçmez; model hazırlama hatası verir. Bu ayar yalnızca BGE reranker içindir, Ollama'nın cihaz seçimini değiştirmez.
 
-CUDA açıkça seçildiğinde GPU kullanılamazsa sistem sessizce CPU'ya
-geçmez. Model yükleme hatası açık şekilde bildirilir.
-
-GPU seçimi BGE reranker içindir. Embedding cihazını veya Ollama'nın
-kendi cihaz yerleşimini değiştirmez.
-
-### Warm-up benchmark
+Warm-up benchmark komutu:
 
 ```bash
-python -m scripts.benchmark_model_warmup --repeats 5 --output data/model_warmup_benchmark.json
+python -m scripts.benchmark_model_warmup \
+  --repeats 5 \
+  --output data/model_warmup_benchmark.json
 ```
 
-Benchmark çıktısı için mevcut olmayan bir dosya yolu seçin.
-Cold ölçümler model residency durumunu ifade eder; disk cache'in
-silindiği anlamına gelmez.
+Ayrıntılar: [Model warm-up validation report](docs/model_warmup_validation.md).
 
-Deneysel sonuçlar, test kapsamı ve bilinen sınırlamalar:
-[Model warm-up validation report](docs/model_warmup_validation.md).
+## Test ve kod kalitesi
+
+Sanal ortam aktifken proje kökünde:
+
+```bash
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+```
+
+Bazı ağır model ve haricî servis entegrasyon testleri gerekli ortam bulunmadığında `skipped` olabilir. Önemli olan test çıktısında `failed` veya `error` bulunmamasıdır.
+
+Node.js kuruluysa frontend JavaScript sözdizimini kontrol edin:
+
+```bash
+for file in frontend/js/*.js; do node --check "$file" || exit 1; done
+```
+
+## Mock modu
+
+Mock modu yalnızca frontend geliştirme ve gösterim amaçlıdır. Teslim sürümünde varsayılan olarak kapalıdır.
+
+Mock modu açmak için frontend adresine `?mock=1` eklenebilir. Bu durumda sayfada geliştirme modu uyarısı gösterilir. Mock evaluation sabit veya uydurma metrik üretmez; gerçek sonuçlar yalnızca backend evaluation akışından gelir.
+
+Mock modu `?mock=0` veya üst bardaki **Mock modu kapat** düğmesiyle kapatılabilir. Ayar yalnızca mevcut tarayıcı sekmesinde tutulur.
+
+## Teslim öncesi kontrol listesi
+
+- [ ] `ollama list` çıktısında `qwen3:8b` görünüyor.
+- [ ] `python -m scripts.prepare_models` başarıyla tamamlanıyor.
+- [ ] Dokuz resmî PDF `data/source_pdfs/` klasöründe bulunuyor.
+- [ ] Dokuz belge katalog üzerinden indekslenmiş durumda.
+- [ ] Admin belge ekranında belgelerin durumu `indexed`.
+- [ ] `/api/health` backend, SQLite ve Qdrant için kullanılabilir durum gösteriyor.
+- [ ] Kaynakta cevabı bulunan sorular belge ve sayfa numarasıyla yanıtlanıyor.
+- [ ] Kaynaklarda cevabı olmayan sorularda `insufficient_context=true` dönüyor.
+- [ ] PDF yükleme ve silme işlemleri çalışıyor.
+- [ ] En az bir gerçek evaluation koşusu tamamlanmış ve SQLite'a kaydedilmiş durumda.
+- [ ] Mock modu kapalı.
+- [ ] Pytest, Ruff ve frontend sözdizimi kontrolleri hatasız tamamlanıyor.
+
+## Bilinen sınırlamalar
+
+- Admin girişi demo amaçlıdır; gerçek kullanıcı doğrulaması sağlamaz.
+- SQLite ve embedded Qdrant tek bilgisayarlı yerel kullanım için seçilmiştir.
+- Aynı embedded Qdrant klasörü backend ve CLI tarafından eş zamanlı açılamaz.
+- PDF'ler, model ağırlıkları, SQLite veritabanı ve Qdrant indeksleri Git deposunda saklanmaz.
+- CPU üzerinde `qwen3:8b` ve BGE reranker özellikle ilk istekte yavaş çalışabilir.
+- Sistem metin tabanlı PDF'leri işler; taranmış görüntü PDF'leri için OCR desteği bulunmaz.
+- Aynı PDF admin panelinden farklı kayıt bilgileriyle birden fazla kez yüklenebilir.
+
+## Sorun giderme
+
+| Durum | Çözüm |
+| --- | --- |
+| 8000 veya 5500 portu kullanımda | Açık kalan uvicorn, Live Server veya `http.server` sürecini kapatın. |
+| Sunucuya bağlanılamıyor | `python scripts/run_dev.py` terminal çıktısını kontrol edin. |
+| İlk soru uzun sürüyor | Model warm-up işleminin tamamlanmasını bekleyin ve bilinen bir soruyla modeli önceden ısıtın. |
+| Sorular yanıtlanmıyor | Ollama'nın çalıştığını ve `ollama list` çıktısında `qwen3:8b` bulunduğunu kontrol edin. |
+| `model_preparing` hatası | Modeller hâlâ hazırlanıyor; kısa süre sonra yeniden deneyin. |
+| `model_unavailable` hatası | `python -m scripts.prepare_models` çalıştırıp terminaldeki asıl model hatasını kontrol edin. |
+| Admin ekranında indeks yok | Belgeleri admin panelinden yükleyin veya katalog indeksleme komutunu çalıştırın. |
+| Qdrant klasörü kullanımda | Backend veya başka indeksleme/evaluation sürecini kapatın. |
+| PowerShell `Activate.ps1` çalışmıyor | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` komutunu bir kez çalıştırın. |
+
+## Proje yapısı
+
+```text
+backend/app/api/       FastAPI route'ları
+backend/app/core/      Ayarlar, middleware ve hata yönetimi
+backend/app/db/        SQLite veritabanı ve repository'ler
+backend/app/rag/       Retrieval, reranking, LLM ve kaynak doğrulama
+backend/app/services/  Belge işleme, soru-cevap ve evaluation servisleri
+backend/app/schemas/   API ve servis veri modelleri
+backend/tests/         Birim ve entegrasyon testleri
+frontend/              Öğrenci ve admin HTML/CSS/JavaScript arayüzleri
+scripts/               Çalıştırma, indeksleme, evaluation ve model hazırlama CLI'ları
+resources/             Dokuz resmî belgenin kataloğu
+data/evaluation/       Evaluation soru seti
+data/source_pdfs/      Yerel kaynak PDF'ler; Git'e eklenmez
+data/documents/        Uygulama tarafından saklanan PDF'ler; Git'e eklenmez
+data/qdrant_local/     Yerel Qdrant indeksi; Git'e eklenmez
+docs/                  Teknik doğrulama ve benchmark notları
+```
+
+## Kapanış
+
+CampusLens AI eğitim amaçlı bir prototiptir. Üretilen cevaplar yalnızca yüklenen resmî belgelere dayanır. Kesin ve güncel idari işlemler için ilgili üniversite birimine ve belgenin resmî kaynağına başvurulmalıdır.
