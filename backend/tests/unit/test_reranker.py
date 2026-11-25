@@ -83,7 +83,11 @@ def test_model_is_loaded_only_once(candidates, cross_encoder):
     reranker.rerank("First question", candidates)
     reranker.rerank("Second question", candidates)
 
-    cross_encoder.assert_called_once_with("BAAI/bge-reranker-v2-m3")
+    cross_encoder.assert_called_once_with(
+        "BAAI/bge-reranker-v2-m3",
+        device="cpu",
+        local_files_only=True,
+    )
     assert model.predict.call_count == 2
 
 

@@ -35,7 +35,11 @@ class Reranker:
 
         with self._lock:
             if self._model is None:
-                self._model = CrossEncoder(self._model_name)
+                self._model = CrossEncoder(
+                    self._model_name,
+                    device="cpu",
+                    local_files_only=True,
+                )
 
             scores = self._model.predict(
                 pairs,
