@@ -105,3 +105,49 @@ def test_write_outputs_is_readable_utf8_json(
     ] == result.chunks  # Person 4 can load as-is
     assert "Öğrenci" in chunks_path.read_text(encoding="utf-8")
     assert len(json.loads(pages_path.read_text(encoding="utf-8"))) == 4
+
+
+# --- .part files never survive a failed upload ---------------------------------- #
+def test_part_file_removed_when_rename_fails(
+    tmp_path: Path, regulation_pdf: Path, monkeypatch
+) -> None:
+    def locked(self, target):  # e.g. Windows: target opened by another process
+        raise PermissionError("[WinError 32] The process cannot access the file")
+
+    monkeypatch.setattr(Path, "replace", locked)
+    uploads = tmp_path / "uploads"
+    content = regulation_pdf.read_bytes()
+    with pytest.raises(PermissionError):
+        save_uploaded_pdf(content, "doc-7", base_dir=uploads)
+    assert list(uploads.iterdir()) == []
+
+
+def test_part_file_removed_when_validation_crashes(
+    tmp_path: Path, regulation_pdf: Path, monkeypatch
+) -> None:
+    from backend.app.services import document_processor as module
+
+    def crash(path):
+        raise RuntimeError("unexpected PyMuPDF failure")
+
+    monkeypatch.setattr(module, "validate_pdf", crash)
+    uploads = tmp_path / "uploads"
+    with pytest.raises(RuntimeError):
+        save_uploaded_pdf(regulation_pdf.read_bytes(), "doc-8", base_dir=uploads)
+    assert list(uploads.iterdir()) == []
+
+
+def test_part_file_removed_for_corrupt_pdf(tmp_path: Path) -> None:
+    from backend.tests.pdf_factory import CORRUPT_PDF_BYTES
+
+    with pytest.raises(InvalidPDFError):
+        save_uploaded_pdf(CORRUPT_PDF_BYTES, "doc-9", base_dir=tmp_path)
+    assert list(tmp_path.glob("*.part")) == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_delete_document_file_also_removes_leftover_part(tmp_path: Path) -> None:
+    (tmp_path / "doc-10.pdf").write_bytes(b"%PDF-1.7")
+    (tmp_path / "doc-10.pdf.part").write_bytes(b"%PDF-1.7")
+    assert delete_document_file("doc-10", base_dir=tmp_path) is True
+    assert list(tmp_path.iterdir()) == []

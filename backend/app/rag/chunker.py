@@ -329,6 +329,7 @@ def _boundary_priorities(text: str, offs: list[tuple[int, int]]) -> list[int]:
             prio[i] = _PARAGRAPH
         elif "\n" in separator or (
             last_char in _SENTENCE_END
+            and last_char != ":"  # "Başlangıç: 14.09.2026" is not a sentence end
             and not _starts_lowercase(token_text)
             and not (last_char == "." and _dot_is_not_sentence_end(text, prev_end - 1))
             and not _AMENDMENT_NOTE.match(text, prev_end)
@@ -410,14 +411,15 @@ def _overlap_start(prio: list[int], start: int, end: int, overlap: int) -> int:
     if overlap == 0:
         return end
     target = max(end - overlap, start + 1)
-    slack = max(1, overlap // 4)
-    sentence_starts = [
-        i
-        for i in range(max(target - slack, start + 1), min(target + slack, end - 1) + 1)
-        if prio[i] >= _SENTENCE
-    ]
-    if sentence_starts:
-        return min(sentence_starts, key=lambda i: (abs(i - target), i))
+    # Wide enough to reach the start of a table row or sentence, so the next
+    # chunk does not begin in the middle of one.
+    slack = max(1, overlap // 2)
+    window = range(max(target - slack, start + 1), min(target + slack, end - 1) + 1)
+    # Prefer the start of a paragraph / table row, then of a sentence.
+    for level in (_PARAGRAPH, _SENTENCE):
+        starts = [i for i in window if prio[i] >= level]
+        if starts:
+            return min(starts, key=lambda i: (abs(i - target), i))
     word_starts = [i for i in range(target, end) if prio[i] >= _WORD]
     return word_starts[0] if word_starts else end
 

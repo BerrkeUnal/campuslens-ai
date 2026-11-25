@@ -15,6 +15,7 @@ from backend.app.rag.chunker import (
 from backend.app.rag.pdf_extractor import PageText, extract_pages
 from backend.app.rag.text_cleaner import clean_pages
 from backend.app.schemas.retrieval import ChunkRecord
+from backend.tests import pdf_factory
 
 DOC_ID = "3f6c2a1e-0000-4000-8000-000000000001"
 REQUIRED = {
@@ -247,3 +248,60 @@ def test_chapter_with_title_on_same_line() -> None:
         "İKİNCİ BÖLÜM Eğitim-Öğretim ile İlgili Esaslar\n\nMetin."
     )
     assert markers == [(0, "İKİNCİ BÖLÜM Eğitim-Öğretim ile İlgili Esaslar")]
+
+
+# --- academic calendar: "Güz Yarıyılı" must reach every chunk of its rows ------- #
+
+
+def _calendar_chunks(tmp_path: Path, counter) -> list:
+    pdf = pdf_factory.build_ruled_calendar(
+        tmp_path / "takvim.pdf", fall_rows=30, spring_rows=30
+    )
+    return _chunk(clean_pages(extract_pages(pdf)), counter)
+
+
+def test_guz_yariyili_is_in_every_chunk_with_fall_rows(tmp_path: Path) -> None:
+    chunks = _calendar_chunks(tmp_path, ApproximateTokenCounter())
+    fall = [c for c in chunks if "Güz etkinliği" in c.text]
+    spring = [c for c in chunks if "Bahar etkinliği" in c.text]
+    assert len(fall) >= 2 and len(spring) >= 2  # the table really is split
+    assert all("Güz Yarıyılı" in c.text for c in fall)
+    assert all("Bahar Yarıyılı" in c.text for c in spring)
+    # Column headers travel with the values in every chunk.
+    assert all("Başlangıç: " in c.text and "Bitiş: " in c.text for c in fall + spring)
+
+
+def test_calendar_chunks_start_and_end_on_row_boundaries(tmp_path: Path) -> None:
+    for chunk in _calendar_chunks(tmp_path, ApproximateTokenCounter()):
+        rows = [r for r in chunk.text.split("\n\n") if "etkinliği" in r]
+        assert rows, chunk.chunk_id
+        assert rows[0].split(" – ", 1)[0] in {"Güz Yarıyılı", "Bahar Yarıyılı"}
+        assert rows[-1].rstrip().endswith(tuple("0123456789"))
+
+
+def test_calendar_section_title_follows_the_semester(tmp_path: Path) -> None:
+    chunks = _calendar_chunks(tmp_path, ApproximateTokenCounter())
+    for chunk in chunks:
+        if "Bahar etkinliği" in chunk.text and "Güz etkinliği" not in chunk.text:
+            assert chunk.section_title == "Bahar Yarıyılı"
+        elif "Güz etkinliği" in chunk.text and "Bahar etkinliği" not in chunk.text:
+            assert chunk.section_title == "Güz Yarıyılı"
+
+
+def test_inline_colon_is_not_a_sentence_boundary(ws_counter) -> None:
+    text = "Etkinlik: Ders kayıtları | Başlangıç: 14.09.2026"
+    offs = ws_counter.offsets(text)
+    prio = dict(
+        zip((text[s:e] for s, e in offs), _boundary_priorities(text, offs), strict=True)
+    )
+    assert prio["Ders"] < 2 and prio["14.09.2026"] < 2
+
+
+def test_guz_yariyili_with_real_e5_tokenizer_if_available(tmp_path: Path) -> None:
+    try:
+        counter = HFTokenCounter()
+    except Exception:  # noqa: BLE001
+        pytest.skip("intfloat/multilingual-e5-small tokenizer not cached / offline")
+    chunks = _calendar_chunks(tmp_path, counter)
+    assert all("Güz Yarıyılı" in c.text for c in chunks if "Güz etkinliği" in c.text)
+    assert all(counter.count(c.text) <= 400 for c in chunks)

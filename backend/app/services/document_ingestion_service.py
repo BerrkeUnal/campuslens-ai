@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.app.core.exceptions import ApplicationError
 from backend.app.ports.document_processor import DocumentProcessor
 from backend.app.ports.vector_store import VectorStore
+from backend.app.rag.pdf_extractor import NoExtractableTextError
 from backend.app.rag.qdrant_store import get_vector_store
 from backend.app.schemas.documents import (
     DocumentCreate,
@@ -78,7 +79,8 @@ class DocumentIngestionService:
             )
 
             if not chunks:
-                raise RuntimeError("Belge işleyici herhangi bir parça üretmedi.")
+                # A PDF without usable text is a client-side problem (HTTP 422).
+                raise NoExtractableTextError("Document processor returned no chunks.")
 
             await self._vector_store.upsert_chunks(chunks)
 
@@ -108,11 +110,18 @@ class DocumentIngestionService:
                 else ("Belge işlenirken beklenmeyen bir hata oluştu.")
             )
 
-            await self._document_service.update_document_status(
-                document.document_id,
-                DocumentStatus.FAILED,
-                error_message=error_message,
-            )
+            try:
+                await self._document_service.update_document_status(
+                    document.document_id,
+                    DocumentStatus.FAILED,
+                    error_message=error_message,
+                )
+            except Exception:
+                # Never hide the original (often 4xx) error behind a DB error.
+                logger.exception(
+                    "Could not mark document as failed: %s",
+                    document.document_id,
+                )
 
             raise
 
