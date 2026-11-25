@@ -16,6 +16,7 @@ def runtime_settings() -> Settings:
         embedding_model="intfloat/multilingual-e5-small",
         sparse_model="Qdrant/bm25",
         reranker_model="BAAI/bge-reranker-v2-m3",
+        reranker_device="cpu",
         llm_provider="ollama",
         llm_temperature=0.0,
         ollama_base_url="http://127.0.0.1:11434",
@@ -325,3 +326,60 @@ def test_validation_does_not_mutate_settings(
 
     assert runtime_settings.model_dump() == runtime_before
     assert application.model_dump() == application_before
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openai"])
+@pytest.mark.parametrize("device", ["cpu", "cuda:0"])
+def test_matching_reranker_devices_are_compatible(
+    runtime_settings: Settings,
+    provider: str,
+    device: str,
+) -> None:
+    runtime = runtime_settings.model_copy(
+        update={
+            "llm_provider": provider,
+            "reranker_device": device,
+        },
+    )
+
+    application = runtime.model_copy()
+
+    validate_model_settings_compatibility(
+        application,
+        runtime,
+    )
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openai"])
+@pytest.mark.parametrize(
+    ("runtime_device", "application_device"),
+    [
+        ("cpu", "cuda:0"),
+        ("cuda:0", "cpu"),
+    ],
+)
+def test_reranker_device_mismatch_is_rejected(
+    runtime_settings: Settings,
+    provider: str,
+    runtime_device: str,
+    application_device: str,
+) -> None:
+    runtime = runtime_settings.model_copy(
+        update={
+            "llm_provider": provider,
+            "reranker_device": runtime_device,
+        },
+    )
+
+    application = runtime.model_copy(
+        update={"reranker_device": application_device},
+    )
+
+    with pytest.raises(
+        ModelSettingsMismatchError,
+        match="reranker_device",
+    ):
+        validate_model_settings_compatibility(
+            application,
+            runtime,
+        )

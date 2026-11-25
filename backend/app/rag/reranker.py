@@ -2,6 +2,7 @@ import logging
 import math
 from threading import Lock
 
+import torch
 from sentence_transformers import CrossEncoder
 
 from backend.app.core.config import get_settings
@@ -33,17 +34,33 @@ class Reranker:
     """Rerank retrieved candidates using a BGE cross-encoder."""
 
     def __init__(self, model_name: str | None = None) -> None:
-        self._model_name = model_name or get_settings().reranker_model
+        settings = get_settings()
+        self._model_name = model_name or settings.reranker_model
+        self._device = settings.reranker_device
         self._model: CrossEncoder | None = None
         self._lock = Lock()
+
+    def _validate_device(self) -> None:
+        """Validate explicit CUDA configuration before loading."""
+        if self._device == "cuda:0":
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "CUDA was requested for the reranker but is unavailable."
+                )
+
+            if torch.cuda.device_count() < 1:
+                raise RuntimeError(
+                    "CUDA device cuda:0 is unavailable."
+                )
 
     def _get_model_locked(self) -> CrossEncoder:
         """Return the shared model while the caller holds the lock."""
         if self._model is None:
             try:
+                self._validate_device()
                 self._model = CrossEncoder(
                     self._model_name,
-                    device="cpu",
+                    device=self._device,
                     local_files_only=True,
                 )
             except Exception as exc:

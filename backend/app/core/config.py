@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     embedding_model: str = "intfloat/multilingual-e5-small"
     sparse_model: str = "Qdrant/bm25"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_device: Literal["cpu", "cuda:0"] = "cpu"
 
     model_warmup_enabled: bool = True
 

@@ -18,6 +18,7 @@ def validate_model_settings_compatibility(
         "embedding_model",
         "sparse_model",
         "reranker_model",
+        "reranker_device",
         "llm_temperature",
     )
 

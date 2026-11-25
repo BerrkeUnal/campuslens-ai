@@ -137,7 +137,7 @@ async def run_benchmark(repeats: int, output: Path) -> None:
             "dense": settings.embedding_model,
             "sparse": settings.sparse_model,
             "reranker": settings.reranker_model,
-            "reranker_device": "cpu",
+            "reranker_device": settings.reranker_device,
             "llm": settings.ollama_model,
             "ollama_keep_alive": settings.ollama_keep_alive,
         },
