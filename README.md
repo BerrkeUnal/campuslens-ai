@@ -70,20 +70,28 @@ En kolay yol admin ekranıdır: **Admin girişi → Belgeler → PDF yükle**. B
 büyük belgelerde birkaç dakika sürebilir. Admin girişi şimdilik demo amaçlıdır; demo bilgileri
 `frontend/js/mock-data.js` dosyasında `DEMO_ADMIN_CREDENTIALS` olarak tanımlıdır (ayrıntı: [`frontend/README.md`](frontend/README.md)).
 
-Komut satırından da yapılabilir (backend kapalıyken; yerel Qdrant klasörünü aynı anda tek süreç açabilir):
+Komut satırından da yapılabilir (backend kapalıyken; yerel Qdrant klasörünü aynı anda tek süreç açabilir).
+Bu komutlar admin yüklemesiyle aynı yolu kullanır: belge SQLite'a kaydedilir, PDF `data/documents/` altına konur ve
+Qdrant'a indekslenir; yani admin ekranında görünür ve oradan silinebilir.
 
 ```bash
-python -m backend.scripts.process_pdf yonetmelik.pdf --title "Ön Lisans ve Lisans Eğitim-Öğretim Yönetmeliği" --source-url "https://..."
-python scripts/index_documents.py --input data/processed/<belge-id>/chunks.json
+# Tek PDF
+python scripts/index_documents.py --pdf yonetmelik.pdf --title "Ön Lisans ve Lisans Eğitim-Öğretim Yönetmeliği" --source-url "https://..."
+
+# Katalogdaki PDF'lerin hepsi (başlık ve kaynak URL katalogdan alınır)
+python scripts/index_documents.py --catalog resources/istinye_documents.json --pdf-dir <pdf-klasörü>
 ```
 
-`process_pdf` çıktı klasörünü (`data/processed/<belge-id>/`) ekrana yazar.
+Aynı kaynak URL'si zaten indekslenmişse belge atlanır; yeniden indekslemek için `--replace` ekleyin.
+`--input data/processed/<belge-id>/chunks.json` (`python -m backend.scripts.process_pdf` çıktısı) chunk'ları doğrudan
+Qdrant'a yazar; yalnızca test ve hata ayıklama içindir, bu belgeler admin ekranında görünmez.
 
 Kullanılan İstinye Üniversitesi belgelerinin listesi ve kaynak adresleri: `resources/istinye_documents.json`.
 
 ## Değerlendirme
 
-Önce katalogdaki dokuz PDF’yi aynı kaynak URL’leriyle işleyip Qdrant’a indeksleyin. Cevapsız soruların değerlendirilmesi için seçilen LLM sağlayıcısı çalışıyor olmalıdır. Admin ekranından bir yöntem veya tüm yöntemler seçilebilir. API koşuyu arka planda işler ve sonuçları SQLite’tan sunar. Yeni bir veritabanında sonuç listesi boştur.
+Önce katalogdaki dokuz PDF’yi aynı kaynak URL’leriyle işleyip Qdrant’a indeksleyin
+(`python scripts/index_documents.py --catalog resources/istinye_documents.json --pdf-dir <pdf-klasörü>`). Cevapsız soruların değerlendirilmesi için seçilen LLM sağlayıcısı çalışıyor olmalıdır. Admin ekranından bir yöntem veya tüm yöntemler seçilebilir. API koşuyu arka planda işler ve sonuçları SQLite’tan sunar. Yeni bir veritabanında sonuç listesi boştur.
 
 Aynı 50 soruluk test setini terminalden çalıştırmak için:
 

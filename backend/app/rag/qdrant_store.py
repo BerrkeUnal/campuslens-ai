@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager, nullcontext
 from typing import Any
 
@@ -56,6 +56,7 @@ from backend.app.schemas.retrieval import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "bm25"
@@ -112,6 +113,21 @@ class CollectionSchemaError(VectorStoreError):
             code="index_schema_mismatch",
             message=(
                 "Belge arama indeksi beklenen yapıda değil. "
+                "Lütfen sistem yöneticisine bildirin."
+            ),
+            status_code=503,
+        )
+
+
+class VectorStoreConfigError(VectorStoreError, ValueError):
+    """QDRANT_URL cannot be used (HTTP 503); still a ``ValueError`` for scripts."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            detail,
+            code="vector_store_misconfigured",
+            message=(
+                "Belge arama servisinin ayarı (QDRANT_URL) geçersiz. "
                 "Lütfen sistem yöneticisine bildirin."
             ),
             status_code=503,
@@ -205,14 +221,20 @@ def create_qdrant_client(location: str) -> QdrantClient:
 
     if scheme:
         url = scheme.group(1).lower() + location[scheme.end(1) :]
-        return QdrantClient(
-            url=url,
-            timeout=QDRANT_TIMEOUT_SECONDS,
-            check_compatibility=False,
-        )
+
+        try:
+            return QdrantClient(
+                url=url,
+                timeout=QDRANT_TIMEOUT_SECONDS,
+                check_compatibility=False,
+            )
+        except ValueError as exc:  # e.g. urllib3 LocationParseError (bad port)
+            raise VectorStoreConfigError(
+                f"QDRANT_URL '{location}' is not a valid server URL: {exc}",
+            ) from exc
 
     if not _looks_like_folder(location):
-        raise ValueError(
+        raise VectorStoreConfigError(
             f"QDRANT_URL '{location}' is not an http(s) URL, ':memory:' or a "
             "folder path. Use e.g. 'http://localhost:6333' for a Qdrant server "
             "or './data/qdrant_local' for embedded local mode.",
@@ -228,6 +250,10 @@ def create_qdrant_client(location: str) -> QdrantClient:
     except RuntimeError as exc:
         raise VectorStoreUnavailableError(
             f"Local Qdrant folder {folder} is already used by another process: {exc}",
+        ) from exc
+    except (OSError, ValueError) as exc:  # e.g. the path is an existing file
+        raise VectorStoreConfigError(
+            f"QDRANT_URL folder {folder} cannot be used for local Qdrant: {exc}",
         ) from exc
 
 
@@ -926,55 +952,96 @@ class QdrantVectorStore:
 
     Embedding (CPU) and Qdrant calls (network I/O) are blocking, so they run
     in a worker thread and never block the event loop.
+
+    Without an explicit ``store`` the engine is created on first use. A wrong
+    ``QDRANT_URL`` or a local folder locked by another process therefore
+    fails the operation that needs Qdrant (HTTP 503), not the FastAPI
+    dependency, and ``health_status()`` reports ``unavailable`` for it.
     """
 
-    def __init__(self, store: QdrantStore | None = None) -> None:
-        self._store = store or get_qdrant_store()
+    def __init__(
+        self,
+        store: QdrantStore | None = None,
+        *,
+        store_factory: Callable[[], QdrantStore] | None = None,
+    ) -> None:
+        self._store = store
+        self._store_factory = store_factory or get_qdrant_store
+        self._store_lock = threading.Lock()
 
     @property
     def store(self) -> QdrantStore:
+        """The engine; creating it may raise (e.g. ``VectorStoreConfigError``)."""
+        if self._store is None:
+            with self._store_lock:
+                if self._store is None:
+                    self._store = self._store_factory()
+
         return self._store
 
+    def close(self) -> None:
+        """Close the engine if it was created; never creates one just to close it."""
+        with self._store_lock:
+            store = self._store
+
+        if store is not None:
+            store.close()
+
+    async def _run(self, method_name: str, *args: Any) -> Any:
+        # The engine is created inside the worker thread as well.
+        return await asyncio.to_thread(
+            lambda: getattr(self.store, method_name)(*args),
+        )
+
     async def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
-        await asyncio.to_thread(self._store.upsert_chunks, chunks)
+        await self._run("upsert_chunks", chunks)
 
     async def delete_document(self, document_id: str) -> None:
-        await asyncio.to_thread(self._store.delete_document, document_id)
+        await self._run("delete_document", document_id)
 
     async def search_bm25(
         self,
         question: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
     ) -> list[RetrievedChunk]:
-        return await asyncio.to_thread(self._store.search_bm25, question, limit)
+        return await self._run("search_bm25", question, limit)
 
     async def search_dense(
         self,
         question: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
     ) -> list[RetrievedChunk]:
-        return await asyncio.to_thread(self._store.search_dense, question, limit)
+        return await self._run("search_dense", question, limit)
 
     async def search_hybrid_rrf(
         self,
         question: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
     ) -> list[RetrievedChunk]:
-        return await asyncio.to_thread(self._store.search_hybrid_rrf, question, limit)
+        return await self._run("search_hybrid_rrf", question, limit)
 
     # Extras beyond the port -------------------------------------------------
 
     async def replace_document_chunks(self, chunks: list[ChunkRecord]) -> None:
-        await asyncio.to_thread(self._store.replace_document_chunks, chunks)
+        await self._run("replace_document_chunks", chunks)
 
     async def create_collection(self, recreate: bool = False) -> None:
-        await asyncio.to_thread(self._store.create_collection, recreate)
+        await self._run("create_collection", recreate)
 
     async def warm_up(self) -> None:
-        await asyncio.to_thread(self._store.warm_up)
+        await self._run("warm_up")
 
     async def health_status(self) -> str:
-        return await asyncio.to_thread(self._store.health_status)
+        return await asyncio.to_thread(self._health_status)
+
+    def _health_status(self) -> str:
+        try:
+            store = self.store
+        except Exception:  # a health check must not raise
+            logger.warning("Qdrant store could not be created", exc_info=True)
+            return "unavailable"
+
+        return store.health_status()
 
 
 _default_store: QdrantStore | None = None
@@ -999,10 +1066,9 @@ def get_vector_store() -> QdrantVectorStore:
     global _default_vector_store
 
     if _default_vector_store is None:
-        store = get_qdrant_store()
-
         with _default_lock:
             if _default_vector_store is None:
-                _default_vector_store = QdrantVectorStore(store)
+                # Never raises: the engine is created on first use.
+                _default_vector_store = QdrantVectorStore()
 
     return _default_vector_store

@@ -11,6 +11,7 @@ import zlib
 import httpx
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from qdrant_client import QdrantClient, models
 from qdrant_client.common.client_exceptions import ResourceExhaustedResponse
@@ -19,7 +20,9 @@ from qdrant_client.http.exceptions import (
     UnexpectedResponse,
 )
 
+from backend.app.core.config import Settings
 from backend.app.core.exceptions import ApplicationError
+from backend.app.main import create_app
 from backend.app.ports.vector_store import VectorStore
 from backend.app.rag import qdrant_store as qdrant_store_module
 from backend.app.rag.embedder import EmbeddingModelError
@@ -29,14 +32,17 @@ from backend.app.rag.qdrant_store import (
     CollectionSchemaError,
     QdrantStore,
     QdrantVectorStore,
+    VectorStoreConfigError,
     VectorStoreError,
     VectorStoreUnavailableError,
     _validate_limit,
     chunk_point_id,
     compute_content_hash,
     create_qdrant_client,
+    get_vector_store,
 )
 from backend.app.schemas.retrieval import ChunkRecord
+from backend.app.services.document_processor import get_document_processor
 
 DIMENSION = 8
 
@@ -531,8 +537,14 @@ def test_server_urls_are_accepted_case_insensitively() -> None:
 
 @pytest.mark.parametrize("value", ["localhost:6333", "qdrant:6333", "qdrant", ""])
 def test_ambiguous_qdrant_url_is_rejected(value: str) -> None:
-    with pytest.raises(ValueError, match="QDRANT_URL"):
+    with pytest.raises(ValueError, match="QDRANT_URL") as caught:
         create_qdrant_client(value)
+
+    # Still a ValueError for scripts, but a clear 503 for the API.
+    assert isinstance(caught.value, VectorStoreConfigError)
+    assert caught.value.status_code == 503
+    assert caught.value.code == "vector_store_misconfigured"
+    assert "QDRANT_URL" in caught.value.message
 
 
 def test_local_folder_is_locked_for_a_second_client(tmp_path) -> None:
@@ -544,3 +556,194 @@ def test_local_folder_is_locked_for_a_second_client(tmp_path) -> None:
             create_qdrant_client(folder)
     finally:
         first.close()
+
+
+# Lazy engine: a wrong QDRANT_URL must not break the FastAPI dependency -----------------
+
+
+def test_async_store_creates_the_engine_once_on_first_use(
+    fake_embedder: FakeEmbedder,
+) -> None:
+    created: list[QdrantStore] = []
+
+    def factory() -> QdrantStore:
+        store = QdrantStore(
+            client=QdrantClient(":memory:"),
+            embedder=fake_embedder,
+            collection_name="lazy",
+        )
+        created.append(store)
+        return store
+
+    vector_store = QdrantVectorStore(store_factory=factory)
+    assert created == []
+
+    async def check_many() -> list[str]:
+        return await asyncio.gather(*(vector_store.health_status() for _ in range(8)))
+
+    assert asyncio.run(check_many()) == ["collection_missing"] * 8
+    assert len(created) == 1
+    assert vector_store.store is created[0]
+    created[0].close()
+
+
+def test_bad_qdrant_url_fails_the_operation_and_health_reports_it(
+    fake_embedder: FakeEmbedder,
+) -> None:
+    attempts = []
+
+    def factory() -> QdrantStore:
+        attempts.append(1)
+        return QdrantStore(
+            embedder=fake_embedder,
+            settings=Settings(qdrant_url="localhost:6333"),
+        )
+
+    vector_store = QdrantVectorStore(store_factory=factory)
+
+    assert asyncio.run(vector_store.health_status()) == "unavailable"
+
+    with pytest.raises(VectorStoreConfigError):
+        asyncio.run(vector_store.search_hybrid_rrf("staj süresi"))
+
+    # A failed creation is not cached, so a fixed setting is picked up later.
+    assert len(attempts) == 2
+
+
+def test_locked_local_folder_is_reported_as_unavailable(
+    tmp_path,
+    fake_embedder: FakeEmbedder,
+) -> None:
+    folder = str(tmp_path / "qdrant")
+    holder = create_qdrant_client(folder)  # e.g. index_documents.py still running
+
+    try:
+        vector_store = QdrantVectorStore(
+            store_factory=lambda: QdrantStore(
+                embedder=fake_embedder,
+                settings=Settings(qdrant_url=folder),
+            ),
+        )
+
+        assert asyncio.run(vector_store.health_status()) == "unavailable"
+
+        with pytest.raises(VectorStoreUnavailableError):
+            asyncio.run(vector_store.upsert_chunks([chunk("doc-a", 0)]))
+    finally:
+        holder.close()
+
+
+class _OneChunkProcessor:
+    def process_document(self, file_path, document) -> list[ChunkRecord]:
+        return [chunk(str(document.document_id), 0)]
+
+
+def _tiny_pdf() -> bytes:
+    import pymupdf
+
+    document = pymupdf.open()
+    document.new_page().insert_text((72, 72), "MADDE 1 - Test")
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def test_api_with_bad_qdrant_url_reports_degraded_and_clear_503(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # The real get_vector_store() dependency, built from a wrong QDRANT_URL.
+    monkeypatch.setattr(qdrant_store_module, "_default_store", None)
+    monkeypatch.setattr(qdrant_store_module, "_default_vector_store", None)
+    monkeypatch.setattr(
+        qdrant_store_module,
+        "get_settings",
+        lambda: Settings(qdrant_url="localhost:6333"),
+    )
+    monkeypatch.chdir(tmp_path)  # uploads are stored under ./data/documents
+
+    app = create_app(
+        Settings(
+            app_env="testing",
+            database_url=f"sqlite:///{(tmp_path / 'api.db').as_posix()}",
+        ),
+    )
+    app.dependency_overrides[get_document_processor] = _OneChunkProcessor
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        health = client.get("/api/health")
+        upload = client.post(
+            "/api/documents/upload",
+            data={
+                "title": "Test Yönetmeliği",
+                "source_url": "https://example.edu.tr/t.pdf",
+            },
+            files={"file": ("test.pdf", _tiny_pdf(), "application/pdf")},
+        )
+        documents = client.get("/api/documents").json()["documents"]
+
+    assert health.status_code == 200
+    assert health.json()["status"] == "degraded"
+    assert health.json()["qdrant"] == "unavailable"
+    assert health.json()["database"] == "ok"
+
+    assert upload.status_code == 503
+    assert upload.json()["error"] == "vector_store_misconfigured"
+    assert [document["status"] for document in documents] == ["failed"]
+
+    assert isinstance(get_vector_store(), QdrantVectorStore)
+
+
+@pytest.mark.parametrize("value", ["http://localhost:63a3", "https://[::1"])
+def test_malformed_server_url_is_a_config_error(value: str) -> None:
+    with pytest.raises(VectorStoreConfigError):
+        create_qdrant_client(value)
+
+
+def test_existing_file_as_local_folder_is_a_config_error(tmp_path) -> None:
+    not_a_folder = tmp_path / "qdrant.txt"
+    not_a_folder.write_text("x", encoding="utf-8")
+
+    with pytest.raises(VectorStoreConfigError):
+        create_qdrant_client(str(not_a_folder))
+
+
+def test_close_never_creates_the_engine(fake_embedder: FakeEmbedder) -> None:
+    attempts = []
+
+    def factory() -> QdrantStore:
+        attempts.append(1)
+        raise VectorStoreConfigError("QDRANT_URL 'x' is not usable")
+
+    vector_store = QdrantVectorStore(store_factory=factory)
+    vector_store.close()  # e.g. in a script's finally block after a failure
+    assert attempts == []
+
+    store = QdrantStore(
+        client=QdrantClient(":memory:"),
+        embedder=fake_embedder,
+        collection_name="close",
+    )
+    created = QdrantVectorStore(store)
+    created.close()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        store.client.get_collections()
+
+
+def test_async_store_calls_the_engines_own_methods(memory_store: QdrantStore) -> None:
+    class CountingStore(QdrantStore):
+        searches = 0
+
+        def search_dense(self, question, limit=20):
+            CountingStore.searches += 1
+            return []
+
+    store = CountingStore(
+        client=memory_store.client,
+        embedder=memory_store._embedder,
+        collection_name="counting",
+    )
+
+    assert asyncio.run(QdrantVectorStore(store).search_dense("staj")) == []
+    assert CountingStore.searches == 1
