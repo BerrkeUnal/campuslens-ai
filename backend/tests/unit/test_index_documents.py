@@ -17,7 +17,11 @@ from qdrant_client import QdrantClient, models
 
 from backend.app.core.config import Settings
 from backend.app.db.database import SQLiteDatabase
-from backend.app.rag.qdrant_store import QdrantStore, QdrantVectorStore
+from backend.app.rag.qdrant_store import (
+    QdrantStore,
+    QdrantVectorStore,
+    VectorStoreUnavailableError,
+)
 from backend.app.schemas.documents import DocumentStatus
 from backend.app.schemas.retrieval import ChunkRecord
 from backend.app.services.document_ingestion_service import DocumentIngestionService
@@ -320,58 +324,125 @@ def test_valid_argument_combinations() -> None:
     assert chunks.recreate is True
 
 
-def test_main_pdf_mode_writes_sqlite_files_and_qdrant(
-    tmp_path, monkeypatch, capsys
-) -> None:
-    monkeypatch.chdir(tmp_path)  # data/documents is relative, like the backend
-    database_url = f"sqlite:///{(tmp_path / 'main.db').as_posix()}"
-    settings = Settings(qdrant_url=":memory:", database_url=database_url)
-    monkeypatch.setattr(index_documents, "get_settings", lambda: settings)
+# main(): runs from the repository root like the backend ------------------------------
+
+
+@pytest.fixture
+def cli(tmp_path: Path, monkeypatch):
+    """A fake repository root with relative settings, and a different cwd."""
+    root = tmp_path / "repo"
+    elsewhere = tmp_path / "elsewhere"
+    root.mkdir()
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # main() changes cwd; monkeypatch restores it
+
+    def configure(**overrides) -> Settings:
+        values = {"qdrant_url": ":memory:", "database_url": "sqlite:///./data/cli.db"}
+        settings = Settings(**(values | overrides))
+        monkeypatch.setattr(index_documents, "get_settings", lambda: settings)
+        return settings
+
+    configure()
     monkeypatch.setattr(index_documents, "TextEmbedder", FakeEmbedder)
     monkeypatch.setattr(index_documents, "get_document_processor", FakeProcessor)
-    pdf = make_pdf(tmp_path / "sinav.pdf")
+    return SimpleNamespace(root=root, elsewhere=elsewhere, configure=configure)
 
-    exit_code = index_documents.main(
-        ["--pdf", str(pdf), "--title", "Sınav Yönetmeliği", "--source-url", URL],
+
+def run_main(cli, argv: list[str]) -> int:
+    return index_documents.main(argv, root=cli.root)
+
+
+def rows(database_path: Path) -> list:
+    database = SQLiteDatabase(f"sqlite:///{database_path.as_posix()}")
+    return asyncio.run(SQLiteDocumentService(database).list_documents()).documents
+
+
+def test_main_pdf_mode_uses_repository_paths_from_any_folder(cli, capsys) -> None:
+    make_pdf(cli.elsewhere / "sinav.pdf")
+
+    # A relative --pdf is read from the current folder ...
+    exit_code = run_main(
+        cli,
+        ["--pdf", "sinav.pdf", "--title", "Sınav Yönetmeliği", "--source-url", URL],
     )
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "[OK]" in output
     assert "1 indekslendi" in output
-    database = SQLiteDatabase(database_url)
-    [document] = asyncio.run(SQLiteDocumentService(database).list_documents()).documents
+    # ... but DATABASE_URL and data/documents are relative to the repository root.
+    [document] = rows(cli.root / "data" / "cli.db")
     assert document.status == DocumentStatus.INDEXED
-    assert (tmp_path / "data" / "documents" / f"{document.document_id}.pdf").is_file()
+    assert (cli.root / "data" / "documents" / f"{document.document_id}.pdf").is_file()
+    assert not (cli.elsewhere / "data").exists()
 
 
-def test_main_catalog_mode_reports_missing_pdfs(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.chdir(tmp_path)
-    settings = Settings(
-        qdrant_url=":memory:",
-        database_url=f"sqlite:///{(tmp_path / 'main.db').as_posix()}",
-    )
-    monkeypatch.setattr(index_documents, "get_settings", lambda: settings)
-    monkeypatch.setattr(index_documents, "TextEmbedder", FakeEmbedder)
-    monkeypatch.setattr(index_documents, "get_document_processor", FakeProcessor)
-    (tmp_path / "pdfs").mkdir()
+def test_main_catalog_mode_reports_missing_pdfs(cli, capsys) -> None:
+    (cli.elsewhere / "pdfs").mkdir()
 
-    exit_code = index_documents.main(
-        ["--catalog", str(CATALOG), "--pdf-dir", str(tmp_path / "pdfs")],
-    )
+    exit_code = run_main(cli, ["--catalog", str(CATALOG), "--pdf-dir", "pdfs"])
 
-    output = capsys.readouterr().out
     assert exit_code == 1
-    assert output.count("[YOK]") == 9
+    assert capsys.readouterr().out.count("[YOK]") == 9
 
 
-def test_main_reports_unusable_qdrant_url(tmp_path, monkeypatch, capsys) -> None:
-    settings = Settings(qdrant_url="localhost:6333")
-    monkeypatch.setattr(index_documents, "get_settings", lambda: settings)
-    monkeypatch.setattr(index_documents, "TextEmbedder", FakeEmbedder)
+def test_main_stops_before_storing_anything_when_qdrant_is_down(
+    cli,
+    monkeypatch,
+    capsys,
+) -> None:
+    def qdrant_down(self, recreate: bool = False) -> None:
+        raise VectorStoreUnavailableError("connection refused")
+
+    monkeypatch.setattr(QdrantStore, "create_collection", qdrant_down)
+    make_pdf(cli.elsewhere / "sinav.pdf")
+
+    exit_code = run_main(
+        cli,
+        ["--pdf", "sinav.pdf", "--title", "Sınav Yönetmeliği", "--source-url", URL],
+    )
+
+    assert exit_code == 2
+    assert "hiçbir belge işlenmedi" in capsys.readouterr().err
+    assert not (cli.root / "data").exists()  # no SQLite row, no stored PDF
+
+
+def test_main_prints_the_summary_even_if_the_search_fails(
+    cli,
+    monkeypatch,
+    capsys,
+) -> None:
+    def search_fails(self, question: str, limit: int = 20):
+        raise VectorStoreUnavailableError("timeout")
+
+    monkeypatch.setattr(QdrantStore, "search_dense", search_fails)
+    make_pdf(cli.elsewhere / "sinav.pdf")
+
+    exit_code = run_main(
+        cli,
+        [
+            "--pdf",
+            "sinav.pdf",
+            "--title",
+            "Sınav Yönetmeliği",
+            "--source-url",
+            URL,
+            "--query",
+            "staj",
+        ],
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "1 indekslendi" in captured.out
+    assert "Qdrant" in captured.err
+
+
+def test_main_reports_unusable_qdrant_url(cli, capsys) -> None:
+    cli.configure(qdrant_url="localhost:6333")
     chunks = REPOSITORY_ROOT / "backend" / "tests" / "fixtures" / "sample_chunks.json"
 
-    exit_code = index_documents.main(["--input", str(chunks)])
+    exit_code = run_main(cli, ["--input", str(chunks)])
 
     assert exit_code == 2
     assert "QDRANT_URL ayarı geçersiz" in capsys.readouterr().err

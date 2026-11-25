@@ -692,3 +692,58 @@ def test_api_with_bad_qdrant_url_reports_degraded_and_clear_503(
     assert [document["status"] for document in documents] == ["failed"]
 
     assert isinstance(get_vector_store(), QdrantVectorStore)
+
+
+@pytest.mark.parametrize("value", ["http://localhost:63a3", "https://[::1"])
+def test_malformed_server_url_is_a_config_error(value: str) -> None:
+    with pytest.raises(VectorStoreConfigError):
+        create_qdrant_client(value)
+
+
+def test_existing_file_as_local_folder_is_a_config_error(tmp_path) -> None:
+    not_a_folder = tmp_path / "qdrant.txt"
+    not_a_folder.write_text("x", encoding="utf-8")
+
+    with pytest.raises(VectorStoreConfigError):
+        create_qdrant_client(str(not_a_folder))
+
+
+def test_close_never_creates_the_engine(fake_embedder: FakeEmbedder) -> None:
+    attempts = []
+
+    def factory() -> QdrantStore:
+        attempts.append(1)
+        raise VectorStoreConfigError("QDRANT_URL 'x' is not usable")
+
+    vector_store = QdrantVectorStore(store_factory=factory)
+    vector_store.close()  # e.g. in a script's finally block after a failure
+    assert attempts == []
+
+    store = QdrantStore(
+        client=QdrantClient(":memory:"),
+        embedder=fake_embedder,
+        collection_name="close",
+    )
+    created = QdrantVectorStore(store)
+    created.close()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        store.client.get_collections()
+
+
+def test_async_store_calls_the_engines_own_methods(memory_store: QdrantStore) -> None:
+    class CountingStore(QdrantStore):
+        searches = 0
+
+        def search_dense(self, question, limit=20):
+            CountingStore.searches += 1
+            return []
+
+    store = CountingStore(
+        client=memory_store.client,
+        embedder=memory_store._embedder,
+        collection_name="counting",
+    )
+
+    assert asyncio.run(QdrantVectorStore(store).search_dense("staj")) == []
+    assert CountingStore.searches == 1

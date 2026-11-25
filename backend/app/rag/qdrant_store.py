@@ -26,7 +26,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager, nullcontext
-from typing import Any, TypeVar
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -57,7 +57,6 @@ from backend.app.schemas.retrieval import (
 
 logger = logging.getLogger(__name__)
 
-_T = TypeVar("_T")
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "bm25"
@@ -222,11 +221,17 @@ def create_qdrant_client(location: str) -> QdrantClient:
 
     if scheme:
         url = scheme.group(1).lower() + location[scheme.end(1) :]
-        return QdrantClient(
-            url=url,
-            timeout=QDRANT_TIMEOUT_SECONDS,
-            check_compatibility=False,
-        )
+
+        try:
+            return QdrantClient(
+                url=url,
+                timeout=QDRANT_TIMEOUT_SECONDS,
+                check_compatibility=False,
+            )
+        except ValueError as exc:  # e.g. urllib3 LocationParseError (bad port)
+            raise VectorStoreConfigError(
+                f"QDRANT_URL '{location}' is not a valid server URL: {exc}",
+            ) from exc
 
     if not _looks_like_folder(location):
         raise VectorStoreConfigError(
@@ -245,6 +250,10 @@ def create_qdrant_client(location: str) -> QdrantClient:
     except RuntimeError as exc:
         raise VectorStoreUnavailableError(
             f"Local Qdrant folder {folder} is already used by another process: {exc}",
+        ) from exc
+    except (OSError, ValueError) as exc:  # e.g. the path is an existing file
+        raise VectorStoreConfigError(
+            f"QDRANT_URL folder {folder} cannot be used for local Qdrant: {exc}",
         ) from exc
 
 
@@ -970,47 +979,57 @@ class QdrantVectorStore:
 
         return self._store
 
-    async def _run(self, method: Callable[..., _T], *args: Any) -> _T:
+    def close(self) -> None:
+        """Close the engine if it was created; never creates one just to close it."""
+        with self._store_lock:
+            store = self._store
+
+        if store is not None:
+            store.close()
+
+    async def _run(self, method_name: str, *args: Any) -> Any:
         # The engine is created inside the worker thread as well.
-        return await asyncio.to_thread(lambda: method(self.store, *args))
+        return await asyncio.to_thread(
+            lambda: getattr(self.store, method_name)(*args),
+        )
 
     async def upsert_chunks(self, chunks: list[ChunkRecord]) -> None:
-        await self._run(QdrantStore.upsert_chunks, chunks)
+        await self._run("upsert_chunks", chunks)
 
     async def delete_document(self, document_id: str) -> None:
-        await self._run(QdrantStore.delete_document, document_id)
+        await self._run("delete_document", document_id)
 
     async def search_bm25(
         self,
         question: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
     ) -> list[RetrievedChunk]:
-        return await self._run(QdrantStore.search_bm25, question, limit)
+        return await self._run("search_bm25", question, limit)
 
     async def search_dense(
         self,
         question: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
     ) -> list[RetrievedChunk]:
-        return await self._run(QdrantStore.search_dense, question, limit)
+        return await self._run("search_dense", question, limit)
 
     async def search_hybrid_rrf(
         self,
         question: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
     ) -> list[RetrievedChunk]:
-        return await self._run(QdrantStore.search_hybrid_rrf, question, limit)
+        return await self._run("search_hybrid_rrf", question, limit)
 
     # Extras beyond the port -------------------------------------------------
 
     async def replace_document_chunks(self, chunks: list[ChunkRecord]) -> None:
-        await self._run(QdrantStore.replace_document_chunks, chunks)
+        await self._run("replace_document_chunks", chunks)
 
     async def create_collection(self, recreate: bool = False) -> None:
-        await self._run(QdrantStore.create_collection, recreate)
+        await self._run("create_collection", recreate)
 
     async def warm_up(self) -> None:
-        await self._run(QdrantStore.warm_up)
+        await self._run("warm_up")
 
     async def health_status(self) -> str:
         return await asyncio.to_thread(self._health_status)

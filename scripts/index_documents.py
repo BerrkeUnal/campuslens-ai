@@ -36,6 +36,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 from collections import Counter
@@ -66,7 +67,10 @@ from backend.app.schemas.documents import (
 )
 from backend.app.schemas.retrieval import ChunkRecord, RetrievedChunk
 from backend.app.services.document_ingestion_service import DocumentIngestionService
-from backend.app.services.document_processor import get_document_processor
+from backend.app.services.document_processor import (
+    DOCUMENTS_DIR,
+    get_document_processor,
+)
 from backend.app.services.document_service import (
     DocumentService,
     SQLiteDocumentService,
@@ -190,11 +194,12 @@ async def _ingest_pdf(
     except ValidationError as exc:
         return PdfOutcome(source, "failed", f"başlık veya kaynak URL geçersiz: {exc}")
 
-    previous = [
-        document
-        for document in (await documents.list_documents()).documents
-        if document.source_url == metadata.source_url
-    ]
+    try:
+        listed = (await documents.list_documents()).documents
+    except ApplicationError as exc:
+        return PdfOutcome(source, "failed", f"belge listesi okunamadı: {exc.message}")
+
+    previous = [doc for doc in listed if doc.source_url == metadata.source_url]
     indexed = [doc for doc in previous if doc.status == DocumentStatus.INDEXED]
 
     if indexed and not replace:
@@ -376,8 +381,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # Entry point ---------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, root: Path = REPOSITORY_ROOT) -> int:
     args = parse_args(argv)
+
+    # File arguments are relative to where the command was typed. Settings
+    # (.env, DATABASE_URL, a QDRANT_URL folder, data/documents) are relative
+    # to the repository root, exactly as for the backend (scripts/run_dev.py).
+    for name in ("pdf", "catalog", "pdf_dir", "input"):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, value.resolve())
+
+    os.chdir(root)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     for noisy_logger in ("httpx", "huggingface_hub", "sentence_transformers"):
@@ -452,33 +467,55 @@ def _ingest_pdf_files(args: argparse.Namespace, settings: Settings) -> int:
     started = time.perf_counter()
 
     try:
-        outcomes = asyncio.run(_run_ingestion(database, store, sources, args.replace))
+        try:
+            # Fail before any PDF is stored or gets a SQLite row.
+            store.create_collection()
+        except ApplicationError as exc:
+            print(
+                f"Hata: Qdrant hazır değil, hiçbir belge işlenmedi.\n{exc.message}\n"
+                f"Ayrıntı: {exc}",
+                file=sys.stderr,
+            )
+            return EXIT_SERVICE_ERROR
+
+        try:
+            outcomes = asyncio.run(
+                _run_ingestion(database, store, sources, args.replace),
+            )
+        except ApplicationError as exc:  # e.g. the SQLite file cannot be opened
+            print(f"Hata: {exc.message}\nAyrıntı: {exc}", file=sys.stderr)
+            return EXIT_SERVICE_ERROR
+
+        counts = Counter(outcome.status for outcome in outcomes)
+
+        print("\nBelge yükleme özeti")
+        print(f"  Veritabanı : {database.path}")
+        print(f"  PDF klasörü: {DOCUMENTS_DIR.resolve()}")
+        print(f"  Qdrant     : {settings.qdrant_url} ({store.collection_name})")
+        for outcome in outcomes:
+            print(format_outcome(outcome))
+        print(
+            f"  Toplam     : {counts['indexed']} indekslendi, "
+            f"{counts['skipped']} atlandı, {counts['failed']} hata, "
+            f"{counts['missing']} bulunamadı "
+            f"({time.perf_counter() - started:.1f} sn)",
+        )
+
+        if counts["failed"]:
+            exit_code = EXIT_SERVICE_ERROR
+        else:
+            exit_code = EXIT_INPUT_ERROR if counts["missing"] else EXIT_OK
 
         if args.query:
-            print_search_results(store, args.query, args.top)
-    except ApplicationError as exc:
-        print(f"Hata: {exc.message}\nAyrıntı: {exc}", file=sys.stderr)
-        return EXIT_SERVICE_ERROR
+            try:
+                print_search_results(store, args.query, args.top)
+            except ApplicationError as exc:
+                print(f"Hata: {exc.message}\nAyrıntı: {exc}", file=sys.stderr)
+                exit_code = EXIT_SERVICE_ERROR
+
+        return exit_code
     finally:
         store.close()
-
-    counts = Counter(outcome.status for outcome in outcomes)
-
-    print("\nBelge yükleme özeti")
-    print(f"  Veritabanı : {database.path}")
-    print(f"  Qdrant     : {settings.qdrant_url} ({store.collection_name})")
-    for outcome in outcomes:
-        print(format_outcome(outcome))
-    print(
-        f"  Toplam     : {counts['indexed']} indekslendi, {counts['skipped']} atlandı, "
-        f"{counts['failed']} hata, {counts['missing']} bulunamadı "
-        f"({time.perf_counter() - started:.1f} sn)",
-    )
-
-    if counts["failed"]:
-        return EXIT_SERVICE_ERROR
-
-    return EXIT_INPUT_ERROR if counts["missing"] else EXIT_OK
 
 
 async def _run_ingestion(
