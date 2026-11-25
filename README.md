@@ -83,12 +83,20 @@ Kullanılan İstinye Üniversitesi belgelerinin listesi ve kaynak adresleri: `re
 
 ## Değerlendirme
 
+Önce katalogdaki dokuz PDF’yi aynı kaynak URL’leriyle işleyip Qdrant’a indeksleyin. Cevapsız soruların değerlendirilmesi için seçilen LLM sağlayıcısı çalışıyor olmalıdır. Admin ekranından bir yöntem veya tüm yöntemler seçilebilir. API koşuyu arka planda işler ve sonuçları SQLite’tan sunar. Yeni bir veritabanında sonuç listesi boştur.
+
+Aynı 50 soruluk test setini terminalden çalıştırmak için:
+
 ```bash
-python -m scripts.run_evaluation --method hybrid_rerank   # bm25 | dense | hybrid | hybrid_rerank
+python -m scripts.run_evaluation --method bm25 --split test
+python -m scripts.run_evaluation --method dense --split test
+python -m scripts.run_evaluation --method hybrid --split test
+python -m scripts.run_evaluation --method hybrid_rerank --split test
 ```
 
-Admin ekranındaki **Değerlendirme** sayfası yalnızca gerçek değerlendirme sonuçlarını gösterir. Henüz sonuç yoksa
-"Henüz değerlendirme çalıştırılmadı" yazar; backend'in örnek (mock) olarak işaretlediği sonuçlar ekranda gösterilmez.
+- **Recall@5 ve MRR@5** 42 cevaplanabilir soruda hesaplanır. Doğru kaynak için katalogdaki URL ve bir kabul edilen PDF sayfası eşleşmelidir.
+- **Cevapsız soru doğruluğu** sekiz soru için gerçek RAG dönüşündeki `insufficient_context` alanıyla hesaplanır. URL ve doğru sayfa alanları bu sorularda boştur. Model hatası oluşursa hata soru bazında saklanır. Doğruluk yalnızca ölçülebilen sorulardan hesaplanır ve arayüz kaç sorunun ölçülebildiğini gösterir.
+- **Ortalama arama süresi** 50 sorgunun retrieval süresini kullanır. Hybrid + Rerank süresine yeniden sıralama dahildir. LLM cevap üretme süresi bu ölçümün dışındadır.
 
 ## Testler
 

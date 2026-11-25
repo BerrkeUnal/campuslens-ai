@@ -1,3 +1,4 @@
+from asyncio import Lock
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -32,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.state.database = database
+    app.state.evaluation_lock = Lock()
 
     cors_allowed_origins = (
         (settings.frontend_origin,) if settings.app_env == "development" else ()

@@ -5,7 +5,6 @@ import { initAdminShell } from "./admin-shell.js";
 import { METHOD_LABELS, RETRIEVAL_METHODS, getEvaluationResults, runEvaluation } from "./api.js";
 import {
   el,
-  formatCost,
   formatDate,
   formatDecimal,
   formatMs,
@@ -22,22 +21,17 @@ const STATUS_LABELS = { running: "Çalışıyor", completed: "Tamamlandı", fail
 const METRIC_COLUMNS = [
   { key: "recall_at_5", label: "Source Recall@5", better: "high", format: formatPercent, bar: true },
   { key: "mrr_at_5", label: "MRR@5", better: "high", format: (v) => formatDecimal(v, 2) },
-  { key: "answer_correctness", label: "Answer correctness", better: "high", format: (v) => formatDecimal(v, 2) },
-  { key: "hallucination_rate", label: "Hallucination", better: "low", format: formatPercent, bar: true },
-  { key: "abstention_accuracy", label: "Abstention acc.", better: "high", format: formatPercent },
-  { key: "average_latency_ms", label: "Ort. süre", better: "low", format: formatMs },
-  { key: "total_cost_usd", label: "Toplam maliyet", better: "low", format: formatCost },
+  { key: "abstention_accuracy", label: "Cevapsız soru doğruluğu", better: "high", format: formatPercent },
+  { key: "average_latency_ms", label: "Ort. arama süresi", better: "low", format: formatMs },
   { key: "total_cases", label: "Soru", better: null, format: (v) => String(v ?? "—") },
 ];
 
 const POLL_INTERVAL_MS = 3000;
-const POLL_MAX_DURATION_MS = 10 * 60 * 1000;
 
 const dom = {};
 let running = false;
 let refreshing = false;
 let pollTimer = null;
-let pollStartedAt = 0;
 let lastResults = [];
 
 // ---------------------------------------------------------------------------
@@ -89,18 +83,6 @@ export async function startEvaluation(event) {
       started.push(await runEvaluation({ method, split }));
     }
 
-    if (started.some((run) => run.is_mock)) {
-      // Backend örnek (sabit) metrik döndürdü: bunlar gerçek ölçüm değildir, gösterilmez.
-      setRunState("info", {
-        message: {
-          title: "Gerçek değerlendirme sonucu yok",
-          text:
-            "Değerlendirme servisi henüz gerçek sonuç üretmiyor (backend örnek veri döndürdü). " +
-            "Bu koşuya ait sayılar gösterilmeyecek; gerçek değerlendirme etkinleştirildiğinde sonuçlar burada görünecek.",
-        },
-      });
-      return;
-    }
     const stillRunning = started.some((run) => run.status === "running");
     const failed = started.filter((run) => run.status === "failed").length;
     setRunState(stillRunning ? "running" : "completed", {
@@ -151,7 +133,13 @@ function bestValues(rows) {
   return best;
 }
 
-function metricCell(column, value, best) {
+function metricCell(column, value, best, metrics) {
+  if (column.key === "abstention_accuracy" && metrics.abstention_total > 0) {
+    const coverage = `${metrics.abstention_evaluated}/${metrics.abstention_total}`;
+    const cell = el("td", { className: "num", text: `${column.format(value)} (${coverage})` });
+    cell.title = "Ölçülebilen soru / toplam cevapsız soru";
+    return cell;
+  }
   const cell = el("td", { className: "num", text: column.format(value) });
   if (typeof value !== "number") cell.title = "Bu metrik bu koşuda hesaplanmadı.";
   if (typeof value === "number" && best[column.key] === value) {
@@ -201,7 +189,7 @@ export function renderComparisonTable(results, split = dom.split.value) {
     }
 
     nameCell.append(el("div", { className: "muted", text: formatDate(result.completed_at || result.started_at) }));
-    return el("tr", {}, [nameCell, ...METRIC_COLUMNS.map((column) => metricCell(column, result.metrics[column.key], best))]);
+    return el("tr", {}, [nameCell, ...METRIC_COLUMNS.map((column) => metricCell(column, result.metrics[column.key], best, result.metrics))]);
   });
 
   dom.comparisonBody.replaceChildren(...rows);
@@ -211,19 +199,16 @@ export function renderComparisonTable(results, split = dom.split.value) {
 /** Gerçek sonuç yoksa sayı yerine açıklayıcı boş durum gösterilir. */
 function renderEmptyState(results, split) {
   const realRuns = realResults(results);
-  const anyCompleted = realRuns.some((result) => result.status === "completed" && result.metrics);
-  const anyRunning = realRuns.some((result) => result.status === "running");
-
-  if (anyCompleted) {
-    dom.emptyTitle.textContent = `${SPLIT_LABELS[split] || split} seti için tamamlanmış değerlendirme yok`;
-    dom.emptyText.textContent = "Bu soru seti için bir koşu başlatın veya diğer seti seçin.";
-  } else if (anyRunning) {
+  const splitRuns = realRuns.filter((result) => result.split === split);
+  if (splitRuns.some((result) => result.status === "running")) {
     dom.emptyTitle.textContent = "Değerlendirme çalışıyor";
     dom.emptyText.textContent = "Koşu tamamlandığında metrikler burada görünecek.";
+  } else if (splitRuns.length > 0) {
+    dom.emptyTitle.textContent = `${SPLIT_LABELS[split] || split} seti için tamamlanmış değerlendirme yok`;
+    dom.emptyText.textContent = "Başarısız koşuların ayrıntılarını koşu geçmişinden kontrol edin.";
   } else {
     dom.emptyTitle.textContent = "Henüz değerlendirme çalıştırılmadı";
-    dom.emptyText.textContent =
-      "Metrikler yalnızca gerçek bir değerlendirme koşusu tamamlandığında gösterilir. Yukarıdan bir koşu başlatın.";
+    dom.emptyText.textContent = "Sonuç görmek için yukarıdan bir değerlendirme başlatın.";
   }
 
   const mockCount = results.length - realRuns.length;
@@ -286,15 +271,7 @@ function schedulePolling(results) {
   clearTimeout(pollTimer);
   pollTimer = null;
   const hasRunning = realResults(results).some((result) => result.status === "running");
-  if (!hasRunning) {
-    pollStartedAt = 0;
-    return;
-  }
-  if (!pollStartedAt) pollStartedAt = Date.now();
-  if (Date.now() - pollStartedAt > POLL_MAX_DURATION_MS) {
-    pollStartedAt = 0;
-    return;
-  }
+  if (!hasRunning) return;
   pollTimer = setTimeout(() => refreshResults({ silent: true }), POLL_INTERVAL_MS);
 }
 

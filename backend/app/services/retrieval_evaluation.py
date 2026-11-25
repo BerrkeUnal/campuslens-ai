@@ -1,9 +1,11 @@
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from time import perf_counter
 
-from backend.app.core.exceptions import ServiceUnavailableError
-from backend.app.ports.vector_store import VectorStore
+from backend.app.core.exceptions import ApplicationError, ServiceUnavailableError
+from backend.app.rag.retriever import Retriever
+from backend.app.schemas.questions import PipelineResult
 from backend.app.schemas.retrieval import RetrievalMethod, RetrievedChunk
 from backend.app.services.evaluation_cases import ResolvedEvaluationCase
 from backend.app.services.evaluation_metrics import (
@@ -13,7 +15,10 @@ from backend.app.services.evaluation_metrics import (
     summarize_retrieval,
 )
 
+logger = logging.getLogger(__name__)
+
 Search = Callable[[str, int], Awaitable[list[RetrievedChunk]]]
+AnswerWithContext = Callable[[str, list[RetrievedChunk]], Awaitable[PipelineResult]]
 
 
 @dataclass(frozen=True)
@@ -24,29 +29,49 @@ class RetrievalEvaluation:
 
 class RetrievalEvaluationRunner:
     def __init__(
-        self, store: VectorStore, hybrid_rerank: Search | None = None, *, is_mock: bool
+        self,
+        retriever: Retriever,
+        hybrid_rerank: Search | None = None,
+        *,
+        is_mock: bool,
+        answer_with_context: AnswerWithContext | None = None,
     ) -> None:
         self.is_mock = is_mock
-        self._searches = {
-            RetrievalMethod.BM25: store.search_bm25,
-            RetrievalMethod.DENSE: store.search_dense,
-            RetrievalMethod.HYBRID: store.search_hybrid_rrf,
-            RetrievalMethod.HYBRID_RERANK: hybrid_rerank,
-        }
+        self._answer_with_context = answer_with_context
+        self._retriever = retriever
+        self._hybrid_rerank = hybrid_rerank
 
     async def evaluate(
         self, method: RetrievalMethod, cases: Sequence[ResolvedEvaluationCase]
     ) -> RetrievalEvaluation:
-        search = self._searches[method]
-        if search is None:
-            raise ServiceUnavailableError("Hybrid + Rerank")
         results = []
         for item in cases:
             start = perf_counter()
-            sources = await search(item.case.question, 5)
+            if method == RetrievalMethod.HYBRID_RERANK:
+                if self._hybrid_rerank is None:
+                    raise ServiceUnavailableError("Hybrid + Rerank")
+                sources = await self._hybrid_rerank(item.case.question, 5)
+            else:
+                sources = await self._retriever.retrieve(item.case.question, method)
             latency = (perf_counter() - start) * 1000
-            rank = source_rank_at_5(
-                sources, gold_source_url=item.source_url, gold_pages=item.case.gold_pages
-            )
-            results.append(RetrievalCaseResult(item.case.case_id, rank, latency))
+            if item.source_url is not None:
+                rank = source_rank_at_5(
+                    sources, gold_source_url=item.source_url, gold_pages=item.case.gold_pages
+                )
+                result = RetrievalCaseResult(item.case.case_id, rank, latency)
+            else:
+                if self._answer_with_context is None:
+                    raise ServiceUnavailableError("Cevapsız soru değerlendirmesi")
+                try:
+                    response = await self._answer_with_context(item.case.question, sources[:5])
+                    result = RetrievalCaseResult(
+                        item.case.case_id, None, latency,
+                        response.insufficient_context, response.answer,
+                    )
+                except ApplicationError as exc:
+                    logger.warning("Answer evaluation failed for %s: %s", item.case.case_id, exc)
+                    result = RetrievalCaseResult(
+                        item.case.case_id, None, latency, answer_error=exc.message
+                    )
+            results.append(result)
         return RetrievalEvaluation(results, summarize_retrieval(results))
