@@ -94,46 +94,6 @@ export const mockInsufficientResponse = {
   },
 };
 
-// Backend'deki InMemoryEvaluationService ile aynı mock metrikler.
-const mockEvaluationMetrics = {
-  bm25: {
-    recall_at_5: 0.7,
-    mrr_at_5: 0.58,
-    answer_correctness: 1.2,
-    hallucination_rate: 0.15,
-    abstention_accuracy: 0.7,
-    average_latency_ms: 150,
-    total_cost_usd: 0.01,
-  },
-  dense: {
-    recall_at_5: 0.78,
-    mrr_at_5: 0.65,
-    answer_correctness: 1.35,
-    hallucination_rate: 0.12,
-    abstention_accuracy: 0.75,
-    average_latency_ms: 190,
-    total_cost_usd: 0.01,
-  },
-  hybrid: {
-    recall_at_5: 0.84,
-    mrr_at_5: 0.72,
-    answer_correctness: 1.5,
-    hallucination_rate: 0.1,
-    abstention_accuracy: 0.8,
-    average_latency_ms: 230,
-    total_cost_usd: 0.02,
-  },
-  hybrid_rerank: {
-    recall_at_5: 0.88,
-    mrr_at_5: 0.79,
-    answer_correctness: 1.65,
-    hallucination_rate: 0.08,
-    abstention_accuracy: 0.85,
-    average_latency_ms: 310,
-    total_cost_usd: 0.02,
-  },
-};
-
 // ---------------------------------------------------------------------------
 // Yardımcılar
 // ---------------------------------------------------------------------------
@@ -169,7 +129,7 @@ const MOCK_STATE_KEY = "campuslens.mock.state";
 function loadMockState() {
   try {
     const state = JSON.parse(window.sessionStorage.getItem(MOCK_STATE_KEY) || "null");
-    if (state && Array.isArray(state.documents) && Array.isArray(state.evaluationResults)) return state;
+    if (state && Array.isArray(state.documents)) return state;
   } catch {
     /* bozuk veya erişilemeyen depolama: varsayılanlarla devam */
   }
@@ -178,7 +138,7 @@ function loadMockState() {
 
 function saveMockState() {
   try {
-    window.sessionStorage.setItem(MOCK_STATE_KEY, JSON.stringify({ documents, evaluationResults }));
+    window.sessionStorage.setItem(MOCK_STATE_KEY, JSON.stringify({ documents }));
   } catch {
     /* yoksay */
   }
@@ -208,8 +168,6 @@ const documents = savedState?.documents ?? [
     will_fail: false,
   },
 ];
-
-const evaluationResults = savedState?.evaluationResults ?? [];
 
 // Mock belgelerin durumu yüklenme anından geçen süreye göre ilerler:
 // 0-2 sn uploaded, 2-6 sn processing, sonra indexed (veya failed).
@@ -307,27 +265,19 @@ export const mockApi = {
     return null;
   },
 
-  async runEvaluation({ method, split }) {
-    await wait(1200);
-    const startedAt = new Date().toISOString();
-    const result = {
-      run_id: uuid(),
-      method,
-      split,
-      status: "completed",
-      metrics: { total_cases: split === "validation" ? 10 : 40, ...mockEvaluationMetrics[method] },
-      is_mock: true,
-      started_at: startedAt,
-      completed_at: new Date().toISOString(),
-    };
-    evaluationResults.unshift(result);
-    saveMockState();
-    const { metrics, completed_at: _completedAt, ...runResponse } = result;
-    return runResponse;
+  // Değerlendirme için sabit/uydurma metrik ÜRETİLMEZ: metrikler yalnızca gerçek backend
+  // değerlendirmesinden gelir. Mock modda koşu başlatılamaz ve sonuç listesi boştur.
+  async runEvaluation() {
+    await wait(400);
+    throw mockError(
+      503,
+      "evaluation_unavailable_in_mock",
+      "Geliştirme (mock) modunda değerlendirme çalıştırılamaz. Gerçek sonuçlar için mock modu kapatıp backend'e bağlanın.",
+    );
   },
 
   async getEvaluationResults() {
     await wait(250);
-    return { results: clone(evaluationResults), total: evaluationResults.length };
+    return { results: [], total: 0 };
   },
 };

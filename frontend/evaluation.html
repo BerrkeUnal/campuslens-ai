@@ -91,7 +91,9 @@
           <div id="results-loading" class="state state--loading"><span class="spinner" aria-hidden="true"></span><span>Sonuçlar yükleniyor…</span></div>
           <div id="results-error" hidden></div>
           <div id="results-empty" class="state" hidden>
-            <p>Bu soru seti için henüz tamamlanmış bir değerlendirme yok. Yukarıdan bir koşu başlatın.</p>
+            <p id="results-empty-title" class="state__title">Henüz değerlendirme çalıştırılmadı</p>
+            <p id="results-empty-text">Metrikler yalnızca gerçek bir değerlendirme koşusu tamamlandığında gösterilir. Yukarıdan bir koşu başlatın.</p>
+            <p id="results-empty-note" class="muted" hidden></p>
           </div>
 
           <div id="comparison-wrap" class="table-wrap" hidden>
@@ -109,7 +111,7 @@
 
         <section class="card" aria-labelledby="history-heading">
           <h2 id="history-heading" class="card__title"><svg class="icon" aria-hidden="true"><use href="img/icons.svg#i-clock"></use></svg>Koşu geçmişi</h2>
-          <p id="history-empty" class="muted section-spaced">Henüz koşu yok.</p>
+          <p id="history-empty" class="muted section-spaced">Henüz değerlendirme çalıştırılmadı.</p>
           <div id="history-wrap" class="table-wrap section-spaced" hidden>
             <table>
               <caption class="visually-hidden">Tüm değerlendirme koşuları</caption>

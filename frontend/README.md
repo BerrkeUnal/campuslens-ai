@@ -17,22 +17,40 @@ Sohbet geçmişi saklanmaz ("Son sohbetler" yoktur); sohbet yalnızca açık sek
 
 ## Çalıştırma
 
-ES modülleri `file://` üzerinden çalışmaz; sayfaları bir statik sunucuyla açın.
-Backend CORS ayarı varsayılan olarak `http://127.0.0.1:5500` adresine izin verir (`FRONTEND_ORIGIN`).
+Proje kökünde tek komut (backend + frontend birlikte; ayrıntı: [kök README](../README.md)):
 
 ```bash
-# 1) Backend (proje kökünde)
-uvicorn backend.app.main:app --reload --port 8000
-
-# 2) Frontend (proje kökünde)
-python -m http.server 5500 --bind 127.0.0.1 --directory frontend
+python scripts/run_dev.py
 ```
 
 - Öğrenci ekranı: http://127.0.0.1:5500/index.html
 - Admin girişi: http://127.0.0.1:5500/admin-login.html
 
-VS Code Live Server da 5500 portunu kullanır; adresin `localhost` değil `127.0.0.1` olduğundan emin olun.
+Yalnızca frontend'i ayrı açmak için: `python -m http.server 5500 --bind 127.0.0.1 --directory frontend`
+(VS Code Live Server da olur). ES modülleri `file://` üzerinden çalışmaz. Adresin `localhost` değil `127.0.0.1` olduğundan emin olun;
+backend CORS ayarı yalnızca `http://127.0.0.1:5500` adresine izin verir (`FRONTEND_ORIGIN`).
 API tabanı `js/api.js` içindeki `API_BASE_URL` sabitindedir: `http://127.0.0.1:8000/api`.
+
+## Hata mesajları
+
+- Backend'in döndürdüğü Türkçe mesaj (`message` veya `detail`) olduğu gibi gösterilir; istek kimliği varsa altında yazılır.
+  Mesaj yoksa HTTP durumuna göre Türkçe bir metin kullanılır (İngilizce doğrulama metinleri gösterilmez).
+- "Sunucuya bağlanılamadı" yalnızca sunucuya gerçekten ulaşılamıyorsa gösterilir. İstek başarısız olduğu hâlde `/health`
+  yanıt veriyorsa "Sunucu isteği işlerken bir hata oluştu" yazılır.
+- Soru isteği 180 saniye, belge yükleme 300 saniye bekler. Yanıt uzun sürerse sohbette bekleme metni güncellenir
+  (ilk soruda modeller yüklendiği için 1 dakikayı aşabilir).
+- Öğrenci ekranında yalnızca cevap, kaynak (belge, sayfa, alıntı, bağlantı) ve yanıt süresi gösterilir; retrieval/rerank skoru,
+  token ve maliyet bilgisi gösterilmez.
+
+## Değerlendirme ekranı
+
+Ekranda yalnızca gerçek değerlendirme sonuçları gösterilir; frontend'de sabit veya örnek metrik yoktur.
+
+- Sonuç yoksa "Henüz değerlendirme çalıştırılmadı" boş durumu görünür.
+- Backend'in `is_mock: true` olarak işaretlediği sonuçlar tabloda, grafikte ve geçmişte gösterilmez; yalnızca kaç tanesinin
+  gizlendiği yazılır. Koşu başlatıldığında backend örnek sonuç döndürürse "Gerçek değerlendirme sonucu yok" uyarısı çıkar.
+- Hesaplanmayan (`null`) metrikler "—" olarak, başarısız koşular `error_message` ile gösterilir; çalışan koşular otomatik yenilenir.
+- Gerçek değerlendirme endpoint'i hazır olduğunda frontend'de değişiklik gerekmez: aynı `/api/evaluations/*` sözleşmesi kullanılır.
 
 ## Admin girişi (demo)
 
@@ -66,15 +84,17 @@ Kod: `js/auth.js` (`loginAdmin`, `logoutAdmin`, `isAdminAuthenticated`, `require
 Giriş sayfasının HTML ve CSS yapısı değişmez. Şifre hashleme, güvenli cookie veya token, token süresi,
 yetkisiz isteklerde 401/403, logout endpoint'i ve CORS/cookie ayarları backend tarafında ele alınmalıdır.
 
-## Mock modu (geliştirme ve demo)
+## Mock modu (yalnızca geliştirme)
 
-Backend çalışmıyorsa veya servisler henüz bağlanmadıysa arayüz mock veriyle çalışabilir:
+Mock modu **varsayılan olarak kapalıdır** ve teslim sürümünde kapalı kalır. Backend olmadan arayüzü denemek için:
 
 - Herhangi bir sayfanın adresine `?mock=1` ekleyin (kapatmak için `?mock=0`), ya da
 - Admin üst barındaki **Mock** düğmesine basın.
 
-Seçim tarayıcıda hatırlanır ve öğrenci ekranı için de geçerlidir. Öğrenci ekranında düğme yoktur;
-mock açıkken üst barda "Mock veri kullanılıyor" yazar. Mock belgeler ve değerlendirmeler sekme boyunca korunur.
+Seçim yalnızca o sekme için geçerlidir (`sessionStorage`); sekme kapanınca mock modu kapanır. Önceki sürümlerin kalıcı
+(`localStorage`) ayarı otomatik silinir. Mock açıkken **her sayfanın** üstünde "Geliştirme modu (mock): Bu ekrandaki yanıtlar ve
+belgeler örnek veridir, gerçek değildir" bandı ve **Mock modu kapat** düğmesi görünür.
+Mock modda değerlendirme çalıştırılamaz ve metrik üretilmez.
 
 | Girdi | Sonuç |
 | --- | --- |
@@ -93,9 +113,9 @@ mock açıkken üst barda "Mock veri kullanılıyor" yazar. Mock belgeler ve de�
 | `evaluation.html`, `js/evaluation.js` | Admin değerlendirme ekranı |
 | `js/auth.js` | Demo oturum: giriş, çıkış, sayfa koruması |
 | `js/admin-shell.js` | Admin üst barı: oturum kontrolü, çıkış, mock düğmesi, sunucu durumu |
-| `js/api.js` | Tüm fetch çağrıları, hata dönüşümü, mock anahtarı |
-| `js/mock-data.js` | Backend şemalarıyla aynı şekilde mock veriler ve demo giriş bilgileri |
-| `js/ui.js` | Güvenli DOM yardımcıları, ikonlar, biçimlendirme |
+| `js/api.js` | Tüm fetch çağrıları, hata dönüşümü, zaman aşımları, mock anahtarı |
+| `js/mock-data.js` | Geliştirme için mock soru/belge verileri (değerlendirme metriği yok) ve demo giriş bilgileri |
+| `js/ui.js` | Güvenli DOM yardımcıları, ikonlar, biçimlendirme, sunucu durumu, mock uyarı bandı |
 | `css/app.css` | Tek stil dosyası; renk, boşluk ve yarıçaplar CSS değişkenlerinde |
 | `img/icons.svg`, `img/favicon.svg` | Arayüz ikonları ve sekme ikonu |
 

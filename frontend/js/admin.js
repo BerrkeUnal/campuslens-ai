@@ -32,6 +32,8 @@ const HEALTH_STATES = {
   ok: { cls: "pill--ok", label: "Çalışıyor" },
   mock: { cls: "pill--mock", label: "Mock" },
   not_checked: { cls: "", label: "Kontrol edilmiyor" },
+  unavailable: { cls: "pill--down", label: "Hazır değil" },
+  collection_missing: { cls: "pill--degraded", label: "İndeks yok" },
   down: { cls: "pill--down", label: "Ulaşılamıyor" },
 };
 
@@ -118,7 +120,8 @@ function renderRecentDocuments(documents) {
 // ---------------------------------------------------------------------------
 
 function latestCompletedPerMethod(results) {
-  const completed = results.filter((result) => result.status === "completed" && result.metrics);
+  // Backend'in işaretlediği örnek (is_mock) sonuçlar gerçek ölçüm olmadığı için hiç gösterilmez.
+  const completed = results.filter((result) => !result.is_mock && result.status === "completed" && result.metrics);
   if (!completed.length) return { split: null, rows: new Map() };
 
   // En son koşunun setini kullan; aynı setteki her yöntemin en son sonucunu al.
@@ -136,18 +139,18 @@ function renderChart(results) {
   const { split, rows } = latestCompletedPerMethod(results);
 
   if (!rows.size) {
+    $("chart-subtitle").textContent = "Gerçek bir değerlendirme koşusu tamamlandığında burada görünür.";
     container.replaceChildren(
       el("div", { className: "state" }, [
-        el("p", { text: "Henüz tamamlanmış değerlendirme yok." }),
-        el("a", { className: "link-arrow", text: "Değerlendirme başlat", attrs: { href: "evaluation.html" } }),
+        el("p", { className: "state__title", text: "Henüz değerlendirme çalıştırılmadı" }),
+        el("a", { className: "link-arrow", text: "Değerlendirme ekranına git", attrs: { href: "evaluation.html" } }),
       ]),
     );
     return;
   }
 
   $("chart-subtitle").textContent =
-    `Son ${SPLIT_LABELS[split] || split} koşusunda Source Recall@5 (yüksek daha iyi)` +
-    ([...rows.values()].some((row) => row.is_mock) ? " · mock sonuç" : "");
+    `Son ${SPLIT_LABELS[split] || split} koşusunda Source Recall@5 (yüksek daha iyi)`;
 
   const chart = el("div", {
     className: "barchart",
@@ -255,8 +258,10 @@ function renderHealth(health, latencyMs, error) {
   if (MOCK_MODE) summary.replaceChildren(statusPill("mock", "Mock veri"));
   else if (error) summary.replaceChildren(statusPill("down", "Ulaşılamıyor"));
   else {
-    const allOk = HEALTH_COMPONENTS.every((component) => health?.[component.key] === "ok");
-    summary.replaceChildren(statusPill("ok", allOk ? "Sağlıklı" : "Backend çalışıyor"));
+    // /health: status "ok" → tüm bileşenler hazır, "degraded" → backend açık ama bir bileşen hazır değil.
+    const allOk =
+      health?.status === "ok" || (!health?.status && HEALTH_COMPONENTS.every((c) => health?.[c.key] === "ok"));
+    summary.replaceChildren(allOk ? statusPill("ok", "Sağlıklı") : statusPill("degraded", "Kısmen hazır"));
   }
 }
 
