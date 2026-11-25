@@ -65,6 +65,10 @@ def document_file_path(document_id: UUID | str, base_dir: Path | None = None) ->
     return (base_dir or DOCUMENTS_DIR) / f"{document_id}.pdf"
 
 
+def _partial_file_path(target: Path) -> Path:
+    return target.with_name(f"{target.name}.part")
+
+
 def save_uploaded_pdf(
     content: bytes,
     document_id: UUID | str,
@@ -73,26 +77,31 @@ def save_uploaded_pdf(
     """Validate and store an upload as ``{base_dir}/{document_id}.pdf``.
 
     The stored name comes from the document UUID, never from the user's file
-    name. Files that do not open as a PDF are not kept on disk.
+    name. The upload is written to ``<id>.pdf.part`` first and only renamed
+    after it opens as a PDF. The ``.part`` file is removed in ``finally`` on
+    every path: invalid PDF, disk error, or anything unexpected.
     """
     validate_pdf_bytes(content)
     target = document_file_path(document_id, base_dir)
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".pdf.part")
-    tmp.write_bytes(content)
+    partial = _partial_file_path(target)
     try:
-        validate_pdf(tmp)
-    except PDFProcessingError:
-        tmp.unlink(missing_ok=True)
-        raise
-    tmp.replace(target)
+        partial.write_bytes(content)
+        validate_pdf(partial)  # must really open, extension is not enough
+        partial.replace(target)
+    finally:
+        # After a successful rename the .part no longer exists; otherwise it
+        # is a leftover of a failed upload and must not stay on disk.
+        partial.unlink(missing_ok=True)
     return target
 
 
 def delete_document_file(document_id: UUID | str, base_dir: Path | None = None) -> bool:
+    """Remove the stored PDF and any leftover ``.part`` file of the document."""
     path = document_file_path(document_id, base_dir)
     existed = path.exists()
     path.unlink(missing_ok=True)
+    _partial_file_path(path).unlink(missing_ok=True)
     return existed
 
 

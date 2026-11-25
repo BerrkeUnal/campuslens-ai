@@ -9,8 +9,10 @@ sees in a PDF viewer, so source citations stay correct through the pipeline.
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +75,14 @@ class FileTooLargeError(PDFProcessingError):
     error_code = "file_too_large"
     default_message = "PDF dosyası izin verilen boyuttan büyük."
     http_status = 413
+
+
+class UnreadablePDFError(PDFProcessingError):
+    error_code = "unreadable_pdf"
+    default_message = (
+        "PDF dosyası açıldı ancak içeriği okunamadı. Dosya bozuk olabilir; "
+        "lütfen PDF'i yeniden kaydedip tekrar yükleyin."
+    )
 
 
 class NoExtractableTextError(PDFProcessingError):
@@ -224,7 +234,9 @@ class _Block:
     x1: float
     y1: float
     lines: list[_Line] = field(default_factory=list)
-    table_text: str | None = None  # set for tables: rows as "a | b"
+    # Tables keep their cells; text is rendered later with header/section context.
+    table_rows: list[list[str]] | None = None
+    rendered: str | None = None
 
     @classmethod
     def from_lines(cls, lines: list[_Line]) -> _Block:
@@ -238,15 +250,13 @@ class _Block:
 
     @property
     def is_table(self) -> bool:
-        return self.table_text is not None
+        return self.table_rows is not None
 
     @property
     def text(self) -> str:
-        return (
-            self.table_text
-            if self.table_text is not None
-            else "\n".join(ln.text for ln in self.lines)
-        )
+        if self.rendered is not None:
+            return self.rendered
+        return "\n".join(ln.text for ln in self.lines)
 
 
 def _cell(value: object) -> str:
@@ -264,11 +274,11 @@ def _ruled_tables(page: pymupdf.Page) -> list[_Block]:
     for table in found.tables:
         if table.row_count < 2 or table.col_count < 2:
             continue
-        rows = [" | ".join(_cell(c) for c in row) for row in table.extract()]
-        rows = [row for row in rows if row.replace("|", "").strip()]
+        rows = [[_cell(c) for c in row] for row in table.extract()]
+        rows = [row for row in rows if any(row)]
         if rows:
             x0, y0, x1, y1 = table.bbox
-            tables.append(_Block(x0, y0, x1, y1, table_text="\n".join(rows)))
+            tables.append(_Block(x0, y0, x1, y1, table_rows=rows))
     return tables
 
 
@@ -294,8 +304,95 @@ def _without_table_lines(blocks: list[_Block], tables: list[_Block]) -> list[_Bl
     return result
 
 
-def _rows_from_lines(lines: list[_Line]) -> str:
-    """Group lines of side-by-side columns into rows: "AA | 4,00"."""
+# --------------------------------------------------------------------------- #
+# Table rendering: every row carries its column headers and section label
+# --------------------------------------------------------------------------- #
+_DIGIT = re.compile(r"\d")
+# Section rows of academic calendars: "GÜZ YARIYILI", "Bahar Dönemi", "Yaz Okulu".
+_SECTION_WORDS = re.compile(
+    r"yar[ıi]y[ıi]l|d[öo]nem|yaz okulu|g[üu]z|bahar|semester|term", re.IGNORECASE
+)
+
+
+def _has_digit(cells: list[str]) -> bool:
+    return any(_DIGIT.search(c) for c in cells)
+
+
+def _section_label(row: list[str]) -> str | None:
+    """A row whose only content is one label (a merged cell), e.g. "Güz Yarıyılı"."""
+    values = {c for c in row if c}
+    if len(row) >= 2 and len(values) == 1:
+        return values.pop()
+    return None
+
+
+@dataclass
+class _TableContext:
+    """What a table continued on the next page still needs to know."""
+
+    columns: int
+    headers: list[str] | None
+    section: str | None
+
+
+def _render_table(
+    rows: list[list[str]], previous: _TableContext | None
+) -> tuple[list[str], list[str], _TableContext]:
+    """Turn table cells into self-contained lines.
+
+    ``Güz Yarıyılı – Etkinlik: Ders kayıtları | Başlangıç: 14.09.2026``
+
+    Column headers are written into every row and the current section label
+    is prefixed, so a row keeps its meaning even when the table is split
+    across chunks or pages. Returns (lines, section labels, context).
+    """
+    columns = max(len(r) for r in rows)
+    rows = [r + [""] * (columns - len(r)) for r in rows]
+
+    headers: list[str] | None = None
+    header_index: int | None = None
+    body = [i for i, r in enumerate(rows) if _section_label(r) is None]
+    if body:
+        first = rows[body[0]]
+        rest = [rows[i] for i in body[1:]]
+        # Header row: several labels without numbers, above rows that have numbers.
+        if (
+            sum(bool(c) for c in first) >= 2
+            and not _has_digit(first)
+            and any(_has_digit(r) for r in rest)
+        ):
+            headers, header_index = first, body[0]
+
+    section: str | None = None
+    if previous is not None and previous.columns == columns:
+        section = previous.section
+        if headers is None:
+            headers = previous.headers  # table continues from the previous page
+
+    lines: list[str] = []
+    sections: list[str] = []
+    for index, row in enumerate(rows):
+        if index == header_index:
+            continue
+        if label := _section_label(row):
+            section = label
+            lines.append(label)
+            sections.append(label)
+            continue
+        names = headers or [""] * columns
+        cells = [f"{h}: {v}" if h else v for h, v in zip(names, row, strict=True) if v]
+        line = " | ".join(cells)
+        lines.append(f"{section} – {line}" if section else line)
+
+    if header_index is not None and len(lines) == 0:
+        lines.append(" | ".join(c for c in rows[header_index] if c))
+    return lines, sections, _TableContext(columns, headers, section)
+
+
+# --------------------------------------------------------------------------- #
+# Borderless tables (columns printed as separate narrow text blocks)
+# --------------------------------------------------------------------------- #
+def _group_rows(lines: list[_Line]) -> list[list[_Line]]:
     ordered = sorted(lines, key=lambda ln: (ln.y_center, ln.x0))
     heights = sorted(ln.y1 - ln.y0 for ln in ordered)
     tolerance = heights[len(heights) // 2] * 0.5
@@ -305,18 +402,114 @@ def _rows_from_lines(lines: list[_Line]) -> str:
             rows[-1].append(line)
         else:
             rows.append([line])
-    return "\n".join(
-        " | ".join(ln.text for ln in sorted(row, key=lambda ln: ln.x0)) for row in rows
-    )
+    return [sorted(row, key=lambda ln: ln.x0) for row in rows]
+
+
+def _merge_header_continuations(rows: list[list[_Line]]) -> list[list[_Line]]:
+    """Join a header printed on two lines ("Başarı" / "Notu" -> "Başarı Notu").
+
+    Only a single short line directly under the header row, inside exactly
+    one header column, is joined. Section labels ("GÜZ YARIYILI") are not.
+    """
+    if len(rows) < 3 or len(rows[0]) < 2 or _has_digit([ln.text for ln in rows[0]]):
+        return rows
+    header = list(rows[0])
+    index = 1
+    while index < len(rows) and len(rows[index]) == 1:
+        line = rows[index][0]
+        owners = [h for h in header if line.x0 < h.x1 and line.x1 > h.x0]
+        if (
+            len(owners) != 1
+            or _DIGIT.search(line.text)
+            or line.text.isupper()
+            or _SECTION_WORDS.search(line.text)
+        ):
+            break
+        owner = owners[0]
+        header[header.index(owner)] = _Line(
+            min(owner.x0, line.x0),
+            owner.y0,
+            max(owner.x1, line.x1),
+            line.y1,
+            f"{owner.text} {line.text}",
+        )
+        index += 1
+    return [header, *rows[index:]]
+
+
+def _row_cells(rows: list[list[_Line]]) -> list[list[str]]:
+    """Place each line into a column using the x positions of the widest row."""
+    anchors = max(rows, key=len)
+    columns = len(anchors)
+    cells: list[list[str]] = []
+    for row in rows:
+        out = [""] * columns
+        if (
+            len(row) == 1
+            and columns >= 2
+            and not any(row[0].x0 < a.x1 and row[0].x1 > a.x0 for a in anchors[1:])
+        ):
+            # A lone line in the first column: a section label spans the row.
+            out = [row[0].text] * columns
+        else:
+            for line in row:
+                centre = (line.x0 + line.x1) / 2
+                column = min(
+                    range(columns),
+                    key=lambda c: abs(centre - (anchors[c].x0 + anchors[c].x1) / 2),
+                )
+                out[column] = f"{out[column]} {line.text}".strip()
+        cells.append(out)
+    return cells
 
 
 def _vertical_gap(a: _Block, b: _Block) -> float:
     return max(a.y0, b.y0) - min(a.y1, b.y1)  # negative when they overlap
 
 
+_TABLE_COLUMN_GAP_PT = 24.0  # justified text has ~10 pt between words, tables far more
+
+
+def _split_row_block(block: _Block) -> list[_Block]:
+    """PyMuPDF sometimes puts a whole table row into one block whose lines sit
+    side by side ("Ders kayıtları   14.09.2026   18.09.2026"). Split such a
+    block into one block per cell; ordinary paragraphs are returned as is.
+
+    Justified text can also come out as words side by side, so a block is only
+    split when every gap between side-by-side lines is column-sized.
+    """
+    bands: list[list[_Line]] = []
+    for line in sorted(block.lines, key=lambda ln: ln.y_center):
+        band = bands[-1] if bands else None
+        if band and line.y_center - band[0].y_center <= 0.5 * (line.y1 - line.y0):
+            band.append(line)
+        else:
+            bands.append([line])
+    multi = [sorted(b, key=lambda ln: ln.x0) for b in bands if len(b) > 1]
+    if not multi:
+        return [block]
+    for band in multi:
+        gaps = [right.x0 - left.x1 for left, right in pairwise(band)]
+        if min(gaps) < _TABLE_COLUMN_GAP_PT:
+            return [block]
+    return [_Block.from_lines([line]) for line in block.lines]
+
+
 def _side_by_side_tables(blocks: list[_Block], page_width: float) -> list[_Block]:
-    """Turn borderless tables (columns printed as separate narrow blocks)
-    into row-wise text. Normal full-width paragraphs are never touched."""
+    """Turn borderless tables into rows of cells.
+
+    Handles both layouts PyMuPDF produces: one block per column (cells stacked
+    in a narrow block) and one block per row (cells side by side). Blocks that
+    do not end up in a table are returned unchanged, so normal paragraphs are
+    never touched.
+    """
+    originals = blocks
+    blocks, origin = [], []
+    for index, block in enumerate(originals):
+        pieces = [block] if block.is_table else _split_row_block(block)
+        blocks.extend(pieces)
+        origin.extend([index] * len(pieces))
+
     candidates = [
         i
         for i, b in enumerate(blocks)
@@ -344,7 +537,7 @@ def _side_by_side_tables(blocks: list[_Block], page_width: float) -> list[_Block
         groups.setdefault(find(i), set()).add(i)
     tables = [g for g in groups.values() if len(g) >= 2]
     if not tables:
-        return blocks
+        return originals
 
     def span(group: set[int]) -> _Block:
         return _Block.from_lines([ln for i in group for ln in blocks[i].lines])
@@ -383,11 +576,17 @@ def _side_by_side_tables(blocks: list[_Block], page_width: float) -> list[_Block
                 break
 
     used = set().union(*tables)
-    result = [b for i, b in enumerate(blocks) if i not in used]
+    result: list[_Block] = []
+    for index, block in enumerate(originals):
+        own = [i for i, o in enumerate(origin) if o == index]
+        if not used.intersection(own):
+            result.append(block)  # untouched: keep the original paragraph block
+        else:
+            result.extend(blocks[i] for i in own if i not in used)
     for group in tables:
         lines = [ln for i in group for ln in blocks[i].lines]
         merged = _Block.from_lines(lines)
-        merged.table_text = _rows_from_lines(lines)
+        merged.table_rows = _row_cells(_merge_header_continuations(_group_rows(lines)))
         result.append(merged)
     return result
 
@@ -417,56 +616,89 @@ def _page_blocks(
     return sorted(blocks, key=lambda b: (round(b.y0, 1), b.x0))
 
 
+def _page_text(
+    page: pymupdf.Page,
+    raw: dict[str, Any],
+    body_size: float,
+    table_context: _TableContext | None,
+) -> tuple[PageText, _TableContext | None]:
+    blocks = _page_blocks(page, raw, body_size)
+    headings = [
+        ln.text for b in blocks if not b.is_table for ln in b.lines if ln.is_heading
+    ]
+    context = table_context
+    seen_table = False
+    for block in blocks:
+        if block.table_rows is None:
+            continue
+        seen_table = True
+        lines, sections, context = _render_table(block.table_rows, context)
+        # One paragraph per row: rows are never glued together by the cleaner
+        # and the chunker prefers to cut between rows.
+        block.rendered = "\n\n".join(lines)
+        headings.extend(sections)
+    page_text = PageText(
+        page_number=page.number + 1,
+        text="\n\n".join(b.text for b in blocks if b.text),
+        headings=tuple(headings),
+    )
+    # A table only continues onto the next page from a page that had a table.
+    return page_text, context if seen_table else None
+
+
 def extract_pages(file_path: Path) -> list[PageText]:
     """Extract text per page, keeping real 1-based page numbers.
 
-    Text blocks are separated by a blank line. Tables become one block whose
-    rows are lines of ``cell | cell`` so that values stay next to their labels.
-    Empty pages are returned with empty text (never dropped) so page numbering
-    and empty-page statistics stay correct.
-    """
-    doc = _open_pdf(Path(file_path))
-    try:
-        raw_pages: list[dict[str, Any]] = []
-        for page in doc:
-            try:
-                raw_pages.append(page.get_text("dict", sort=True))
-            except Exception as exc:  # noqa: BLE001
-                # One broken page must not fail the whole document.
-                logger.warning("Page %s could not be read: %s", page.number + 1, exc)
-                raw_pages.append({"blocks": []})
+    Text blocks are separated by a blank line. Table rows become
+    self-contained lines (``Bölüm – Sütun: değer | Sütun: değer``) so that
+    column headers and section labels are never lost. Empty pages are kept
+    with empty text so page numbering and statistics stay correct.
 
-        doc_body_size = _body_font_size(raw_pages)
-        result: list[PageText] = []
-        for page, raw in zip(doc, raw_pages, strict=True):
-            # Per-page body size copes with pages scaled differently.
-            body_size = _body_font_size([raw]) or doc_body_size
-            blocks = _page_blocks(page, raw, body_size)
-            headings = [
-                ln.text
-                for b in blocks
-                if not b.is_table
-                for ln in b.lines
-                if ln.is_heading
-            ]
-            result.append(
-                PageText(
-                    page_number=page.number + 1,
-                    text="\n\n".join(b.text for b in blocks),
-                    headings=tuple(headings),
-                )
-            )
+    Any unexpected PyMuPDF failure while reading pages is reported as
+    ``UnreadablePDFError`` (HTTP 422) instead of an uncontrolled 500.
+    """
+    path = Path(file_path)
+    doc = _open_pdf(path)
+    try:
+        result = _extract_open_document(doc)
+    except PDFProcessingError:
+        raise
+    except Exception as exc:
+        raise UnreadablePDFError(
+            f"PyMuPDF failed while reading {path}: {exc!r}"
+        ) from exc
     finally:
         doc.close()
 
     if all(page.is_empty for page in result):
-        raise NoExtractableTextError(f"No text layer found in {file_path}")
+        raise NoExtractableTextError(f"No text layer found in {path}")
 
     logger.info(
         "Extracted %s pages (%s empty, %s with tables) from %s",
         len(result),
         sum(p.is_empty for p in result),
         sum(" | " in p.text for p in result),
-        Path(file_path).name,
+        path.name,
     )
+    return result
+
+
+def _extract_open_document(doc: pymupdf.Document) -> list[PageText]:
+    raw_pages: list[dict[str, Any]] = []
+    for page in doc:
+        try:
+            raw_pages.append(page.get_text("dict", sort=True))
+        except Exception as exc:  # noqa: BLE001
+            # One broken page must not fail the whole document.
+            logger.warning("Page %s could not be read: %s", page.number + 1, exc)
+            raw_pages.append({"blocks": []})
+
+    doc_body_size = _body_font_size(raw_pages)
+    result: list[PageText] = []
+    context: _TableContext | None = None
+    for page, raw in zip(doc, raw_pages, strict=True):
+        # Per-page body size copes with pages scaled differently.
+        body_size = _body_font_size([raw]) or doc_body_size
+        page_text, context = _page_text(page, raw, body_size, context)
+        result.append(page_text)
     return result

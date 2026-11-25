@@ -4,14 +4,18 @@ import pymupdf
 import pytest
 
 from backend.app.core.exceptions import ApplicationError
+from backend.app.rag import pdf_extractor
 from backend.app.rag.pdf_extractor import (
     EncryptedPDFError,
     InvalidPDFError,
     NoExtractableTextError,
     PDFProcessingError,
+    UnreadablePDFError,
     extract_pages,
     validate_pdf_bytes,
 )
+from backend.app.rag.text_cleaner import clean_pages
+from backend.tests import pdf_factory
 
 
 def test_pages_have_real_one_based_numbers(regulation_pdf: Path) -> None:
@@ -106,10 +110,14 @@ def test_borderless_table_columns_become_rows(tmp_path: Path) -> None:
     doc.save(path)
 
     text = extract_pages(path)[0].text
-    assert "Başarı | Katsayı\nAA | 4,00\nBA | 3,50\nBB | 3,00" in text
+    # Every row carries its column headers, so values never lose their labels.
+    assert (
+        "Başarı: AA | Katsayı: 4,00\n\nBaşarı: BA | Katsayı: 3,50\n\nBaşarı: BB | Katsayı: 3,00"
+        in text
+    )
     assert (
         text.index("tabloda belirtilmiştir")
-        < text.index("AA | 4,00")
+        < text.index("Başarı: AA")
         < text.index("geçer başarı")
     )
 
@@ -134,8 +142,8 @@ def test_ruled_table_rows_are_kept_together(tmp_path: Path) -> None:
     doc.save(path)
 
     text = extract_pages(path)[0].text
-    assert "Ders kayıtları | 15.09.2025" in text
-    assert "Final sınavları | 05.01.2026" in text
+    assert "Etkinlik: Ders kayıtları | Tarih: 15.09.2025" in text
+    assert "Etkinlik: Final sınavları | Tarih: 05.01.2026" in text
 
 
 def test_two_column_body_text_is_not_turned_into_a_table(tmp_path: Path) -> None:
@@ -151,3 +159,115 @@ def test_two_column_body_text_is_not_turned_into_a_table(tmp_path: Path) -> None
     text = extract_pages(path)[0].text
     assert " | " not in text
     assert "Sol sütundaki uzun paragraf" in text and "Sağ sütundaki başka" in text
+
+
+# --- academic calendars: headers and section rows must survive ------------------ #
+
+
+def test_ruled_calendar_rows_carry_headers_and_section(tmp_path: Path) -> None:
+    pages = extract_pages(pdf_factory.build_ruled_calendar(tmp_path / "takvim.pdf"))
+    first, second = pages[0].text, pages[1].text
+
+    assert (
+        "Güz Yarıyılı – Etkinlik: Güz etkinliği 1: ders kaydı ve danışman onayı"
+        in first
+    )
+    assert "| Başlangıç: 01.09.2026 | Bitiş: 04.09.2026" in first
+    assert "Bahar Yarıyılı – Etkinlik: Bahar etkinliği 1:" in first
+    # Page 2 continues the table without header or section row: both are carried over.
+    assert second.startswith("Bahar Yarıyılı – Etkinlik: Bahar etkinliği 10:")
+    assert "Güz Yarıyılı" not in second
+
+
+def test_every_calendar_row_names_its_semester(tmp_path: Path) -> None:
+    pages = extract_pages(pdf_factory.build_ruled_calendar(tmp_path / "takvim.pdf"))
+    rows = [ln for p in pages for ln in p.text.split("\n\n") if "etkinliği" in ln]
+    assert len(rows) == 36
+    for row in rows:
+        semester = "Güz Yarıyılı" if "Güz etkinliği" in row else "Bahar Yarıyılı"
+        assert row.startswith(f"{semester} – Etkinlik: ")
+        assert "Başlangıç: " in row and "Bitiş: " in row
+
+
+def test_calendar_section_rows_are_heading_hints(tmp_path: Path) -> None:
+    pages = extract_pages(pdf_factory.build_ruled_calendar(tmp_path / "takvim.pdf"))
+    assert {"Güz Yarıyılı", "Bahar Yarıyılı"} <= set(pages[0].headings)
+
+
+def test_borderless_calendar_rows_carry_headers_and_section(tmp_path: Path) -> None:
+    text = extract_pages(
+        pdf_factory.build_borderless_calendar(tmp_path / "takvim.pdf")
+    )[0].text
+    assert (
+        "GÜZ YARIYILI – Etkinlik: Ders kayıtları | Başlangıç: 14.09.2026 | Bitiş: 18.09.2026"
+        in text
+    )
+    assert (
+        "BAHAR YARIYILI – Etkinlik: Final sınavları | Başlangıç: 31.05.2027 | Bitiş: 11.06.2027"
+        in text
+    )
+
+
+def test_two_line_header_is_joined_but_section_label_is_not() -> None:
+    def line(x0: float, y0: float, text: str) -> pdf_extractor._Line:
+        return pdf_extractor._Line(x0, y0, x0 + 40, y0 + 10, text)
+
+    rows = [
+        [line(100, 0, "Başarı"), line(200, 0, "Katsayı")],
+        [line(102, 12, "Notu")],  # second line of the first header cell
+        [line(100, 24, "AA"), line(200, 24, "4,00")],
+    ]
+    merged = pdf_extractor._merge_header_continuations(rows)
+    assert [ln.text for ln in merged[0]] == ["Başarı Notu", "Katsayı"]
+
+    rows[1] = [line(102, 12, "Güz Yarıyılı")]
+    kept = pdf_extractor._merge_header_continuations(rows)
+    assert [ln.text for ln in kept[0]] == ["Başarı", "Katsayı"]
+    assert kept[1][0].text == "Güz Yarıyılı"
+
+
+def test_repeated_senate_meeting_table_is_removed(tmp_path: Path) -> None:
+    pages = clean_pages(
+        extract_pages(pdf_factory.build_senate_header_document(tmp_path / "y.pdf"))
+    )
+    for page in pages:
+        assert "TOPLANTI TARİHİ" not in page.text
+        assert "SENATO TOPLANTISI" not in page.text
+        assert page.text.startswith(f"MADDE {page.page_number} – (1)")
+
+
+def test_unexpected_pymupdf_failure_is_a_controlled_422(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pdf = pdf_factory.build_text_pdf(tmp_path / "bozuk-ic.pdf")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("code=2: zlib error: invalid stored block lengths")
+
+    monkeypatch.setattr(pdf_extractor, "_page_blocks", broken)
+    with pytest.raises(UnreadablePDFError) as exc:
+        extract_pages(pdf)
+    assert exc.value.status_code == 422
+    assert "okunamadı" in exc.value.message
+    pdf.unlink()  # the document handle was closed, so the file can be removed (Windows)
+
+
+def test_justified_words_are_not_mistaken_for_table_cells() -> None:
+    def line(x0: float, x1: float, text: str, y: float = 100) -> pdf_extractor._Line:
+        return pdf_extractor._Line(x0, y, x1, y + 10, text)
+
+    # Justified paragraph: PyMuPDF may return words side by side ~10 pt apart.
+    justified = pdf_extractor._Block.from_lines(
+        [line(70, 85, "(3)"), line(95, 150, "Üniversitede,"), line(160, 180, "ders")]
+    )
+    assert pdf_extractor._split_row_block(justified) == [justified]
+
+    # Calendar row: cells are columns apart.
+    row = pdf_extractor._Block.from_lines(
+        [
+            line(64, 102, "Ders kayıtları"),
+            line(334, 366, "14.09.2026"),
+            line(449, 481, "18.09.2026"),
+        ]
+    )
+    assert len(pdf_extractor._split_row_block(row)) == 3

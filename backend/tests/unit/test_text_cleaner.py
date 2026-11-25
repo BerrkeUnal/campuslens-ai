@@ -102,3 +102,8 @@ def test_known_footer_removed_from_short_last_page() -> None:
 def test_table_rows_keep_their_own_lines() -> None:
     text = "Başarı | Katsayı\nAA | 4,00\nBA | 3,50"
     assert clean_page_text(text) == text
+
+
+def test_table_row_paragraphs_are_not_glued_together() -> None:
+    text = "Güz Yarıyılı\n\nGüz Yarıyılı – Etkinlik: Ders kayıtları | Tarih: 14.09.2026\n\nGüz Yarıyılı – Etkinlik: Final"
+    assert clean_page_text(text) == text
