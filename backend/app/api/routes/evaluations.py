@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 
 from backend.app.db.database import SQLiteDatabase, get_database
 from backend.app.db.evaluation_repository import SQLiteEvaluationRepository
+from backend.app.rag.model_readiness_guard import ensure_models_ready
 from backend.app.schemas.evaluations import (
     EvaluationResultListResponse,
     EvaluationRunRequest,
@@ -27,12 +28,18 @@ async def run_evaluation(
     payload: EvaluationRunRequest,
     request: Request,
     background_tasks: BackgroundTasks,
-    evaluation_service: Annotated[SQLiteEvaluationService, Depends(get_sqlite_evaluation_service)],
+    evaluation_service: Annotated[
+        SQLiteEvaluationService, Depends(get_sqlite_evaluation_service)
+    ],
 ) -> EvaluationRunResponse:
+    ensure_models_ready(request.app.state.model_readiness)
     run, cases = await evaluation_service.prepare_run(payload)
     if run.status == EvaluationStatus.RUNNING:
         background_tasks.add_task(
-            evaluation_service.execute_run, run, cases, request.app.state.evaluation_lock
+            evaluation_service.execute_run,
+            run,
+            cases,
+            request.app.state.evaluation_lock,
         )
     return run
 

@@ -8,13 +8,13 @@
 | --- | --- |
 | Backend | Python, FastAPI, SQLite |
 | Vektör arama | Qdrant (yerel klasör modu), `intfloat/multilingual-e5-small`, BM25, `BAAI/bge-reranker-v2-m3` |
-| Dil modeli | Ollama (`qwen3:4b`) |
+| Dil modeli | Ollama (`qwen3:8b`) |
 | Frontend | HTML, CSS, Vanilla JavaScript (build adımı yok) |
 
 ## Gereksinimler
 
 - **Python 3.12** veya üstü
-- **Ollama** (https://ollama.com/download) ve model: `ollama pull qwen3:4b`
+- **Ollama** (https://ollama.com/download) ve model: `ollama pull qwen3:8b`
 - Embedding, sparse retrieval ve reranker modelleri uygulama başlatılmadan önce `python -m scripts.prepare_models` komutuyla hazırlanmalıdır. Çalışma sırasında Hugging Face modelleri yerel cache üzerinden yüklenir.
 
 ## Kurulum (bir kez)
@@ -26,7 +26,7 @@ python -m venv .venv
 # Windows (PowerShell):  .venv\Scripts\Activate.ps1
 # macOS / Linux:         source .venv/bin/activate
 pip install -r requirements.txt
-ollama pull qwen3:4b
+ollama pull qwen3:8b
 python -m scripts.prepare_models
 ```
 
@@ -119,7 +119,7 @@ Teslim edilen sürümde **kapalıdır**. Frontend'i backend olmadan denemek içi
 | "8000 / 5500 portu kullanımda" | Açık kalan uvicorn, Live Server veya `http.server` penceresini kapatın. |
 | "Sunucuya bağlanılamadı" | Backend çalışmıyor; `python scripts/run_dev.py` çıktısındaki hatayı kontrol edin. |
 | İlk soru çok uzun sürüyor | Model hazırlığının tamamlandığını ve başlangıç warm-up işleminin bittiğini kontrol edin. |
-| Sorular yanıtlanmıyor | Ollama açık mı ve `ollama list` çıktısında `qwen3:4b` var mı kontrol edin. |
+| Sorular yanıtlanmıyor | Ollama açık mı ve `ollama list` çıktısında `qwen3:8b` var mı kontrol edin. |
 | Admin ekranında "İndeks yok" | Henüz belge indekslenmedi; Belgeler sayfasından PDF yükleyin. |
 | PowerShell `Activate.ps1` çalışmıyor | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` komutunu bir kez çalıştırın. |
 
@@ -169,7 +169,7 @@ yüklenir; eksik model dosyaları otomatik indirilmez.
 RERANKER_DEVICE=cpu
 MODEL_WARMUP_ENABLED=true
 LLM_PROVIDER=ollama
-OLLAMA_MODEL=qwen3:4b
+OLLAMA_MODEL=qwen3:8b
 OLLAMA_KEEP_ALIVE=30m
 ```
 
