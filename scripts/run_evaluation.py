@@ -46,7 +46,7 @@ async def run(method: RetrievalMethod, split: EvaluationSplit) -> int:
         print(json.dumps(output, ensure_ascii=True, indent=2))
         return 0 if result.status is EvaluationStatus.COMPLETED else 1
     finally:
-        await asyncio.to_thread(store.close)
+        await asyncio.to_thread(store.store.close)
 
 
 def main() -> int:
