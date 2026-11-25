@@ -15,7 +15,7 @@
 
 - **Python 3.12** veya üstü
 - **Ollama** (https://ollama.com/download) ve model: `ollama pull qwen3:8b`
-- İlk çalıştırmada embedding ve reranker modelleri internetten indirilir (yaklaşık 2,5 GB). Bu yüzden ilk soru birkaç dakika sürebilir.
+- Embedding, sparse retrieval ve reranker modelleri uygulama başlatılmadan önce `python -m scripts.prepare_models` komutuyla hazırlanmalıdır. Çalışma sırasında Hugging Face modelleri yerel cache üzerinden yüklenir.
 
 ## Kurulum (bir kez)
 
@@ -27,6 +27,7 @@ python -m venv .venv
 # macOS / Linux:         source .venv/bin/activate
 pip install -r requirements.txt
 ollama pull qwen3:8b
+python -m scripts.prepare_models
 ```
 
 Ayarlar `.env` dosyasından okunur. Dosya yoksa çalıştırma komutu `.env.example` dosyasını kopyalayarak oluşturur.
@@ -125,7 +126,7 @@ Teslim edilen sürümde **kapalıdır**. Frontend'i backend olmadan denemek içi
 | --- | --- |
 | "8000 / 5500 portu kullanımda" | Açık kalan uvicorn, Live Server veya `http.server` penceresini kapatın. |
 | "Sunucuya bağlanılamadı" | Backend çalışmıyor; `python scripts/run_dev.py` çıktısındaki hatayı kontrol edin. |
-| İlk soru çok uzun sürüyor | Modeller ilk kullanımda indirilip yükleniyor; sonraki sorular hızlanır. |
+| İlk soru çok uzun sürüyor | Model hazırlığının tamamlandığını ve başlangıç warm-up işleminin bittiğini kontrol edin. |
 | Sorular yanıtlanmıyor | Ollama açık mı ve `ollama list` çıktısında `qwen3:8b` var mı kontrol edin. |
 | Admin ekranında "İndeks yok" | Henüz belge indekslenmedi; Belgeler sayfasından PDF yükleyin. |
 | PowerShell `Activate.ps1` çalışmıyor | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` komutunu bir kez çalıştırın. |
@@ -141,3 +142,70 @@ scripts/           run_dev.py (tek komutla çalıştırma), index_documents.py, 
 resources/         Belge kataloğu
 data/              Yerel veritabanı, Qdrant klasörü ve değerlendirme soruları (git'e girmez, cases.jsonl hariç)
 ```
+
+
+## Model hazırlığı ve GPU desteği
+
+Model dosyalarını uygulamayı başlatmadan önce hazırlayın:
+
+```bash
+python -m scripts.prepare_models
+```
+
+İlk hazırlık internet bağlantısı gerektirebilir. Normal çalışma
+sırasında embedding ve reranker modelleri yerel cache üzerinden
+yüklenir; eksik model dosyaları otomatik indirilmez.
+
+### Model readiness
+
+- `MODEL_WARMUP_ENABLED=true`: varsayılan başlangıç davranışı.
+- Modeller arka planda embedding, reranker ve Ollama sırasıyla hazırlanır.
+- Hazırlık tamamlanmadan gelen soru istekleri HTTP 503 ve
+  `model_preparing` hata koduyla reddedilir.
+- Hazırlık başarısız olursa soru istekleri HTTP 503 ve
+  `model_unavailable` hata koduyla reddedilir.
+- `/api/health` mevcut backend, database ve Qdrant sağlık
+  sözleşmesini korur; model readiness göstergesi değildir.
+- `MODEL_WARMUP_ENABLED=false` warm-up mekanizmasını devre dışı bırakır.
+  Bu durumda modeller gerektiğinde yüklenebilir.
+
+### Reranker cihaz seçimi
+
+`.env` dosyasındaki varsayılan ayarlar:
+
+```dotenv
+RERANKER_DEVICE=cpu
+MODEL_WARMUP_ENABLED=true
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:8b
+OLLAMA_KEEP_ALIVE=30m
+```
+
+NVIDIA GPU ve CUDA destekli PyTorch bulunan sistemlerde:
+
+```dotenv
+RERANKER_DEVICE=cuda:0
+```
+
+CUDA destekli PyTorch kurulumu kullanılan işletim sistemi, Python
+sürümü ve GPU sürücüsüne uygun olmalıdır. CPU kurulumu taşınabilir
+varsayılan olarak korunmuştur.
+
+CUDA açıkça seçildiğinde GPU kullanılamazsa sistem sessizce CPU'ya
+geçmez. Model yükleme hatası açık şekilde bildirilir.
+
+GPU seçimi BGE reranker içindir. Embedding cihazını veya Ollama'nın
+kendi cihaz yerleşimini değiştirmez.
+
+### Warm-up benchmark
+
+```bash
+python -m scripts.benchmark_model_warmup --repeats 5 --output data/model_warmup_benchmark.json
+```
+
+Benchmark çıktısı için mevcut olmayan bir dosya yolu seçin.
+Cold ölçümler model residency durumunu ifade eder; disk cache'in
+silindiği anlamına gelmez.
+
+Deneysel sonuçlar, test kapsamı ve bilinen sınırlamalar:
+[Model warm-up validation report](docs/model_warmup_validation.md).

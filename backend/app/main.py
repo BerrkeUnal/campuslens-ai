@@ -1,4 +1,4 @@
-from asyncio import Lock
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,16 +14,55 @@ from backend.app.core.config import Settings, get_settings
 from backend.app.core.error_handlers import register_error_handlers
 from backend.app.core.middleware import RequestIDMiddleware
 from backend.app.db.database import SQLiteDatabase
+from backend.app.rag.model_readiness import ModelReadinessManager
+from backend.app.rag.model_settings import (
+    validate_model_settings_compatibility,
+)
+from backend.app.rag.model_warmup import (
+    create_model_readiness_manager,
+)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    readiness_manager: ModelReadinessManager | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     database = SQLiteDatabase(settings.database_url)
+
+    if settings.model_warmup_enabled:
+        if readiness_manager is None:
+            validate_model_settings_compatibility(
+                settings,
+                get_settings(),
+            )
+            readiness_manager = create_model_readiness_manager()
+    else:
+        readiness_manager = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await database.initialize()
-        yield
+
+        warmup_task: asyncio.Task[None] | None = None
+
+        if readiness_manager is not None:
+            warmup_task = asyncio.create_task(
+                readiness_manager.warm_up(),
+                name="campuslens-model-warmup",
+            )
+
+        app.state.model_warmup_task = warmup_task
+
+        try:
+            yield
+        finally:
+            try:
+                if warmup_task is not None:
+                    await warmup_task
+            finally:
+                app.state.model_warmup_task = None
 
     app = FastAPI(
         title="CampusLens AI API",
@@ -33,7 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.state.database = database
-    app.state.evaluation_lock = Lock()
+    app.state.model_readiness = readiness_manager
+    app.state.model_warmup_task = None
+    app.state.evaluation_lock = asyncio.Lock()
 
     cors_allowed_origins = (
         (settings.frontend_origin,) if settings.app_env == "development" else ()

@@ -156,16 +156,32 @@ def _is_all_caps(text: str) -> bool:
 # Model loading ----------------------------------------------------------------
 
 
-def _load_sentence_transformer(model_name: str) -> DenseModel:
+def _load_sentence_transformer(
+    model_name: str,
+    *,
+    local_files_only: bool = True,
+) -> DenseModel:
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(model_name, device="cpu")
+    return SentenceTransformer(
+        model_name,
+        device="cpu",
+        local_files_only=local_files_only,
+    )
 
 
-def _load_sparse_model(model_name: str) -> SparseModel:
+def _load_sparse_model(
+    model_name: str,
+    *,
+    local_files_only: bool = True,
+) -> SparseModel:
     from fastembed import SparseTextEmbedding
 
-    model = SparseTextEmbedding(model_name=model_name, language=BM25_LANGUAGE)
+    model = SparseTextEmbedding(
+        model_name=model_name,
+        language=BM25_LANGUAGE,
+        local_files_only=local_files_only,
+    )
     _load_folded_stopwords(model)
     return model
 
@@ -221,6 +237,7 @@ class TextEmbedder:
         sparse_model_name: str,
         *,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        local_files_only: bool = True,
         dense_model_factory: DenseModelFactory | None = None,
         sparse_model_factory: SparseModelFactory | None = None,
     ) -> None:
@@ -231,8 +248,18 @@ class TextEmbedder:
         self.sparse_model_name = sparse_model_name
         self.batch_size = batch_size
 
-        self._dense_model_factory = dense_model_factory or _load_sentence_transformer
-        self._sparse_model_factory = sparse_model_factory or _load_sparse_model
+        self._dense_model_factory = dense_model_factory or (
+            lambda name: _load_sentence_transformer(
+                name,
+                local_files_only=local_files_only,
+            )
+        )
+        self._sparse_model_factory = sparse_model_factory or (
+            lambda name: _load_sparse_model(
+                name,
+                local_files_only=local_files_only,
+            )
+        )
 
         self._dense_model: DenseModel | None = None
         self._sparse_model: SparseModel | None = None
@@ -250,6 +277,23 @@ class TextEmbedder:
         """Load both models eagerly, e.g. at application startup."""
         self._get_dense_model()
         self._get_sparse_model()
+
+    def warm_up(self) -> None:
+        """Load both models and run a small query inference."""
+        self.load()
+
+        question = "Öğrenci kayıt işlemleri"
+
+        dense_vector = self.encode_query(question)
+        sparse_vector = self.encode_sparse_query(question)
+
+        if not dense_vector:
+            raise _embedding_error("Dense embedding warm-up returned an empty vector.")
+
+        if not sparse_vector.indices:
+            raise _embedding_error("Sparse embedding warm-up returned an empty vector.")
+
+        logger.info("Embedding warm-up completed.")
 
     def encode_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Encode passages with the E5 ``passage:`` prefix."""

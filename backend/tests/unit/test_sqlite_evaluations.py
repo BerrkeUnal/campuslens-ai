@@ -156,3 +156,50 @@ async def test_unanswerable_results_are_saved_and_legacy_mock_rows_are_hidden(
     assert result.metrics.abstention_evaluated == 2
     assert await repository.list_case_results(run.run_id) == cases
     assert await repository.get_result(hidden.run_id) is None
+
+
+def test_create_evaluation_runner_wires_production_components(
+    monkeypatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from backend.app.services import sqlite_evaluation_service as module
+
+    store = Mock()
+    retriever = Mock()
+    reranker = Mock()
+    reranked_search = Mock()
+    pipeline = Mock()
+    runner = Mock()
+
+    retriever_constructor = Mock(return_value=retriever)
+    reranker_provider = Mock(return_value=reranker)
+    hybrid_constructor = Mock(return_value=reranked_search)
+    pipeline_constructor = Mock(return_value=pipeline)
+    runner_constructor = Mock(return_value=runner)
+
+    monkeypatch.setattr(module, "Retriever", retriever_constructor)
+    monkeypatch.setattr(module, "get_reranker", reranker_provider)
+    monkeypatch.setattr(module, "HybridRerankSearch", hybrid_constructor)
+    monkeypatch.setattr(module, "RAGPipeline", pipeline_constructor)
+    monkeypatch.setattr(
+        module, "RetrievalEvaluationRunner", runner_constructor
+    )
+
+    result = module.create_evaluation_runner(store)
+
+    assert result is runner
+
+    retriever_constructor.assert_called_once_with(store)
+    reranker_provider.assert_called_once_with()
+    hybrid_constructor.assert_called_once_with(retriever, reranker)
+    pipeline_constructor.assert_called_once_with(
+        retriever, reranked_search
+    )
+
+    runner_constructor.assert_called_once_with(
+        retriever,
+        reranked_search.search,
+        is_mock=False,
+        answer_with_context=pipeline.answer_with_context,
+    )

@@ -10,7 +10,7 @@ from openai import (
     OpenAIError,
     RateLimitError,
 )
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import ServiceUnavailableError
@@ -24,6 +24,13 @@ class LLMOutput(BaseModel):
     answer: str
     used_source_ids: list[str]
     insufficient_context: bool
+
+    @field_validator("answer")
+    @classmethod
+    def validate_non_empty_answer(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("LLM answer must not be empty.")
+        return value
 
 
 class LLMUsage(BaseModel):
