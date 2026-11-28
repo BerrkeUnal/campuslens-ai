@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     embedding_model: str = "intfloat/multilingual-e5-small"
     sparse_model: str = "Qdrant/bm25"
+    fastembed_cache_path: str = "./data/model_cache/fastembed"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     reranker_device: Literal["cpu", "cuda:0"] = "cpu"
 

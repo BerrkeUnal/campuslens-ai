@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -40,6 +41,14 @@ def test_sparse_loader_forwards_cache_policy(monkeypatch, local_files_only):
 
     monkeypatch.setattr(
         embedder,
+        "get_settings",
+        lambda: SimpleNamespace(
+            fastembed_cache_path="./data/model_cache/fastembed",
+        ),
+    )
+
+    monkeypatch.setattr(
+        embedder,
         "_load_folded_stopwords",
         stopwords,
     )
@@ -52,6 +61,7 @@ def test_sparse_loader_forwards_cache_policy(monkeypatch, local_files_only):
     factory.assert_called_once_with(
         model_name="Qdrant/bm25",
         language=embedder.BM25_LANGUAGE,
+        cache_dir="./data/model_cache/fastembed",
         local_files_only=local_files_only,
     )
 
