@@ -177,9 +177,12 @@ def _load_sparse_model(
 ) -> SparseModel:
     from fastembed import SparseTextEmbedding
 
+    cache_path = get_settings().fastembed_cache_path
+
     model = SparseTextEmbedding(
         model_name=model_name,
         language=BM25_LANGUAGE,
+        cache_dir=cache_path,
         local_files_only=local_files_only,
     )
     _load_folded_stopwords(model)

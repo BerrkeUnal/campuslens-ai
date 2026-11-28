@@ -60,7 +60,7 @@ ollama pull qwen3:8b
 python -m scripts.prepare_models
 ```
 
-`scripts.prepare_models` embedding, sparse retrieval, reranker ve Ollama modelinin kullanılabilir olduğunu kontrol eder. İlk çalıştırma internet hızına göre uzun sürebilir. Normal çalışma sırasında Hugging Face modelleri yerel cache üzerinden yüklenir.
+`scripts.prepare_models` embedding, sparse retrieval, reranker ve Ollama modelinin kullanılabilir olduğunu kontrol eder. İlk çalıştırma internet hızına göre uzun sürebilir. Normal çalışma sırasında Hugging Face modelleri yerel cache üzerinden yüklenir. FastEmbed BM25 dosyaları, işletim sisteminin geçici klasörü yerine `FASTEMBED_CACHE_PATH` ile belirlenen kalıcı klasörde saklanır.
 
 Ayarlar `.env` dosyasından okunur. Dosya yoksa `scripts/run_dev.py`, `.env.example` dosyasını kopyalayarak oluşturur. Yerel ayarlar ve API anahtarları Git deposuna eklenmez.
 
@@ -237,6 +237,7 @@ Varsayılan `.env` ayarları:
 
 ```dotenv
 RERANKER_DEVICE=cpu
+FASTEMBED_CACHE_PATH=./data/model_cache/fastembed
 MODEL_WARMUP_ENABLED=true
 LLM_PROVIDER=ollama
 OLLAMA_MODEL=qwen3:8b
@@ -329,6 +330,7 @@ Mock modu `?mock=0` veya üst bardaki **Mock modu kapat** düğmesiyle kapatıla
 | Sorular yanıtlanmıyor | Ollama'nın çalıştığını ve `ollama list` çıktısında `qwen3:8b` bulunduğunu kontrol edin. |
 | `model_preparing` hatası | Modeller hâlâ hazırlanıyor; kısa süre sonra yeniden deneyin. |
 | `model_unavailable` hatası | `python -m scripts.prepare_models` çalıştırıp terminaldeki asıl model hatasını kontrol edin. |
+| `Qdrant/bm25` cache hatası | `.env` içindeki `FASTEMBED_CACHE_PATH` ayarını kontrol edip `python -m scripts.prepare_models` komutunu yeniden çalıştırın. |
 | Admin ekranında indeks yok | Belgeleri admin panelinden yükleyin veya katalog indeksleme komutunu çalıştırın. |
 | Qdrant klasörü kullanımda | Backend veya başka indeksleme/evaluation sürecini kapatın. |
 | PowerShell `Activate.ps1` çalışmıyor | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` komutunu bir kez çalıştırın. |
@@ -350,6 +352,7 @@ data/evaluation/       Evaluation soru seti
 data/source_pdfs/      Yerel kaynak PDF'ler; Git'e eklenmez
 data/documents/        Uygulama tarafından saklanan PDF'ler; Git'e eklenmez
 data/qdrant_local/     Yerel Qdrant indeksi; Git'e eklenmez
+data/model_cache/      Kalıcı FastEmbed BM25 cache'i; Git'e eklenmez
 docs/                  Teknik doğrulama ve benchmark notları
 ```
 
